@@ -1,0 +1,22 @@
+# requirements.txt for cv_service (Python 3.11)
+
+# FastAPI web framework
+fastapi
+
+# Uvicorn ASGI server
+uvicorn[standard]
+
+# OpenCV without GUI deps (image decoding)
+opencv-python-headless
+
+# PyTorch CPU-only wheels (requires extra index below)
+torch
+torchvision
+
+# HDBSCAN clustering
+hdbscan
+
+# Feature‐extraction support
+scikit-learn
+
+faiss-cpu

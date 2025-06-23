@@ -1,0 +1,6 @@
+@bet_fred_HostAddress = http://localhost:5113
+
+GET {{bet_fred_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

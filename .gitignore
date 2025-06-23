@@ -1,0 +1,65 @@
+# — .NET build & VS artifacts —
+/bin/
+/obj/
+/.vs/
+
+# Rider
+.idea/
+
+# VS Code
+.vscode/
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# — Local SQLite & DB files —
+*.db
+*.sqlite
+*.sqlite3
+# if you have a named file:
+# /DefaultConnection.db
+
+# — Raw slip images (if you stage a local folder) —
+/slips/
+/slips_pdf/
+
+# — Secret configs & envs —
+appsettings.Development.json
+secrets.json
+.env
+
+# — Logs & diagnostics —
+/Logs/
+/*.log
+
+# — Python/CV service artifacts —
+cv_service/__pycache__/
+/cv_service/writer_embedder.pt
+*.py[cod]
+*.pyd
+*.pyo
+
+# — Python virtual environments —
+.venv/
+venv/
+env/
+
+# — PyTorch Lightning checkpoints —
+lightning_logs/
+
+# — Jupyter notebooks —
+.ipynb_checkpoints/
+
+# — Node/npm (if you ever add frontend tooling) —
+node_modules/
+
+# — Front-end build outputs —
+/dist/
+/build/
+
+# — OS files —
+.DS_Store
+Thumbs.db
