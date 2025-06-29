@@ -6,6 +6,8 @@ using Microsoft.IdentityModel.Tokens;
 // using OpenTelemetry.Trace;
 // using OpenTelemetry.Metrics;
 // using OpenTelemetry.Instrumentation.EntityFrameworkCore;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Prometheus;
 using System.Text;
 using Serilog;
@@ -25,7 +27,7 @@ builder.Services.Configure<FormOptions>(options =>
     options.MultipartBodyLengthLimit = 10 * 1024 * 1024; // 10 MB
 });
 
-builder.Services.AddSingleton<IAntivirusScanner, ClamAVScanner>();
+// builder.Services.AddSingleton<IAntivirusScanner, ClamAVScanner>();
 
 // Serilog for logging
 Log.Logger = new LoggerConfiguration()
@@ -50,13 +52,6 @@ builder.Host.UseSerilog();
 //          .AddHttpClientInstrumentation();
 //     });
 
-// Computer Vision API client
-builder.Services.AddHttpClient("cv", client =>
-{
-    client.BaseAddress = new Uri("http://localhost:8000/");
-    client.Timeout = TimeSpan.FromSeconds(30);
-});
-
 // Authentication
 var jwtKey    = builder.Configuration.GetValue<string>("Jwt:Key")
                 ?? throw new InvalidOperationException("Missing configuration: Jwt:Key");
@@ -76,17 +71,23 @@ builder.Services
             IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
         };
     });
-
+builder.Services.AddHttpClient("classification", client =>
+{
+    client.BaseAddress = new Uri("http://localhost:8001/");
+    client.Timeout = TimeSpan.FromSeconds(60); // Classification might take longer
+});
 // API and Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-builder.Services.AddScoped<ThresholdEvaluator>();
 builder.Services.AddHostedService<ThresholdHostedService>();
+builder.Services.AddScoped<ThresholdEvaluator>();
+
 builder.Services.AddAuthorization();
 
 
 var app = builder.Build();
+
 
 app.UseSerilogRequestLogging();
 app.UseAuthentication();
@@ -99,6 +100,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseDefaultFiles();
 app.UseStaticFiles();
 
 // Map controllers and minimal endpoints
@@ -107,6 +109,43 @@ app.UseStaticFiles();
 app.MapControllers();
 app.MapGet("/customers", async (ApplicationDbContext db) =>
     await db.Customers.ToListAsync());
+
+app.MapFallbackToFile("index.html");
+
+
+var users = new[] { new { Username = "admin", Password = "password" } };
+
+app.MapPost("/login", (LoginRequest creds) =>
+{
+    var user = users.SingleOrDefault(u =>
+        u.Username == creds.Username && u.Password == creds.Password
+    );
+    if (user is null)
+        return Results.Unauthorized();
+
+    // Create JWT
+    var claims = new[]
+    {
+        new Claim(JwtRegisteredClaimNames.Sub, user.Username),
+        new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+    };
+    var key    = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+    var credsT = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+    var token  = new JwtSecurityToken(
+        issuer: jwtIssuer,
+        audience: jwtIssuer,
+        claims: claims,
+        expires: DateTime.UtcNow.AddHours(2),
+        signingCredentials: credsT
+    );
+    var jwt = new JwtSecurityTokenHandler().WriteToken(token);
+    return Results.Ok(new { token = jwt });
+})
+.Accepts<LoginRequest>("application/json")
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status401Unauthorized);
+
+
 
 // Creates a new BetRecord (metadata only)
 app.MapPost("/bets", async (BetRecord record, ApplicationDbContext db) =>
@@ -120,7 +159,7 @@ app.MapPost("/bets", async (BetRecord record, ApplicationDbContext db) =>
 .Produces<BetRecord>(StatusCodes.Status201Created);
 
 // Uploads a slip for an existing Bet
-app.MapPost("/bets/{id}/slip", async (int id, IFormFile file, IAntivirusScanner av, ApplicationDbContext db) =>
+app.MapPost("/bets/{id}/slip", async (int id, IFormFile file, ApplicationDbContext db) =>
 {
     var bet = await db.BetRecords.FindAsync(id);
     if (bet is null)
@@ -142,19 +181,18 @@ app.MapPost("/bets/{id}/slip", async (int id, IFormFile file, IAntivirusScanner 
     await file.CopyToAsync(ms);
     bet.ImageData = ms.ToArray();
 
-    if (!await av.IsCleanAsync(bet.ImageData))
-        return Results.BadRequest("Uploaded file failed virus scan.");
-
     await db.SaveChangesAsync();
     return Results.Ok(bet);
 })
 .WithName("UploadSlip")
+.AllowAnonymous()                // if you still want anonymous access
+.DisableAntiforgery()            // ← disable the new built-in XSRF check
 .Accepts<IFormFile>("multipart/form-data")
 .Produces<BetRecord>(StatusCodes.Status200OK)
 .Produces<string>(StatusCodes.Status400BadRequest)
 .Produces<string>(StatusCodes.Status404NotFound)
-.Produces<string>(StatusCodes.Status409Conflict)
-.RequireAuthorization();
+.Produces<string>(StatusCodes.Status409Conflict);
+// .RequireAuthorization();
 
 
 // deletes a BetRecord by Id
@@ -175,8 +213,11 @@ app.MapDelete("/bets/{id}", async (int id, ApplicationDbContext db) =>
 
 app.MapGet("/threshold-check", async (ThresholdEvaluator evaluator) =>
 {
-    var created = await evaluator.EvaluateAsync();
-    return Results.Ok(created);
+    var (pendingTags, alerts) = await evaluator.EvaluateAllThresholdsAsync();
+    return Results.Ok(new {
+        PendingTagsCreated = pendingTags,
+        AlertsCreated = alerts
+    });
 })
 .WithName("ThresholdCheck")
 .Produces<List<PendingTag>>(StatusCodes.Status200OK);
@@ -191,120 +232,170 @@ app.MapGet("/rules", async (ApplicationDbContext db) =>
 app.MapGet("/pendingtags", async (ApplicationDbContext db) =>
     await db.PendingTags.ToListAsync());
 
-// Cluster & record all slips
-app.MapGet("/cluster-and-assign", async (ApplicationDbContext db, IHttpClientFactory httpFactory) =>
-{
-    // 1) Grab every BetRecord that’s got an image
-    var batch = await db.BetRecords
-        .Where(b => b.ImageData != null && b.ImageData.Length > 0)
-        .Select(b => new { b.Id, ImageData = b.ImageData! })
-        .ToListAsync();
-
-    if (batch.Count == 0)
-        return Results.BadRequest("No slips to cluster.");
-
-    var already = new HashSet<int>(
-        await db.HandwritingClusters
-            .Select(h => h.BetRecordId)
-            .ToListAsync()
-   );
-   var toCluster = batch.Where(b => !already.Contains(b.Id)).ToList();
-   if (toCluster.Count == 0)
-       return Results.Ok(new { message = "All slips already clustered" });
-
-    // 2) Build a multipart/form-data request
-    using var form = new MultipartFormDataContent();
-    foreach (var b in batch)
-    {
-        var content = new ByteArrayContent(b.ImageData);
-        form.Add(content, "files", $"{b.Id}.jpg");
-    }
-
-    // 3) Post to your Python CV service
-    var client   = httpFactory.CreateClient("cv");
-    var response = await client.PostAsync("/cluster", form);
-    if (!response.IsSuccessStatusCode)
-    {
-        var error = await response.Content.ReadAsStringAsync();
-        return Results.Problem(error, statusCode: (int)response.StatusCode);
-    }
-
-    var results = await response.Content.ReadFromJsonAsync<List<ClusterResult>>();
-    if (results is null)
-        return Results.Problem("Clustering service returned no data.");
-
-    // 4) Insert a HandwritingCluster row per slip
-    foreach (var r in results.Where(r => !already.Contains(r.Id)))
-    {
-        db.HandwritingClusters.Add(new HandwritingCluster {
-            BetRecordId = r.Id,
-            ClusterId   = r.Cluster,
-            CreatedAt   = DateTime.UtcNow
-            // CustomerId stays null until the cluster is tagged
-        });
-    }
-    await db.SaveChangesAsync();
-
-    // 5) Return the raw cluster assignments
-    return Results.Ok(results);
-})
-.WithName("ClusterAndAssign")
-.Produces<List<ClusterResult>>(StatusCodes.Status200OK);
-
-app.MapGet("/clusters", async (ApplicationDbContext db) =>
-    await db.HandwritingClusters
-            .Select(h => new { h.Id, h.ClusterLabel, h.CreatedAt })
-            .ToListAsync());
-
-// Assign a real customer to a handwriting cluster, clear its pending tags, and fire alerts.
-app.MapPatch("/clusters/{clusterId}/tag", async (
-        int clusterId,
-        TagClusterRequest req,
-        ApplicationDbContext db) =>
-{
-    var cluster = await db.HandwritingClusters.FindAsync(clusterId);
-    if (cluster is null)
-        return Results.NotFound($"Cluster {clusterId} not found.");
-
-    if (cluster.CustomerId != null)
-        return Results.Conflict($"Cluster {clusterId} is already tagged to customer {cluster.CustomerId}.");
-
-    // 1) Tie cluster to customer
-    cluster.CustomerId = req.CustomerId;
-
-    // 2) Find & remove all pending tags for this cluster
-    var toRemove = await db.PendingTags
-        .Where(t => t.Tag.EndsWith($"|{cluster.ClusterId}"))
-        .ToListAsync();
-
-    // 3) Create an Alert per removed tag
-    var now = DateTime.UtcNow;
-    var alerts = toRemove.Select(t =>
-    {
-        var ruleName = t.Tag.Split('|', 2)[0];
-        return new Alert
+// ADD - New endpoints for writer classification system
+app.MapGet("/writer-classifications", async (ApplicationDbContext db) =>
+    await db.WriterClassifications
+        .Include(wc => wc.BetRecord)
+        .Include(wc => wc.Customer)
+        .Select(wc => new
         {
-            CustomerId = req.CustomerId,
-            Message = $"Customer {req.CustomerId} triggered rule '{ruleName}'.",
-            TriggeredAt = now,
-            RuleId = null  // or look up rule by name if you added RuleId to PendingTag
-        };
-    }).ToList();
+            wc.Id,
+            wc.BetRecordId,
+            wc.WriterId,
+            wc.Confidence,
+            wc.ConfidenceLevel,
+            wc.CreatedAt,
+            CustomerName = wc.Customer != null ? wc.Customer.TagName : null,
+            BetAmount = wc.BetRecord.Amount
+        })
+        .ToListAsync())
+.WithName("GetWriterClassifications");
 
-    db.Alerts.AddRange(alerts);
-    db.PendingTags.RemoveRange(toRemove);
+// ADD - Tag a writer (create customer from pending tag)
+app.MapPost("/pending-tags/{id}/complete", async (
+    int id,
+    CompletePendingTagRequest req,
+    ApplicationDbContext db) =>
+{
+    var pendingTag = await db.PendingTags.FindAsync(id);
+    if (pendingTag is null)
+        return Results.NotFound($"Pending tag {id} not found.");
+
+    if (pendingTag.IsCompleted)
+        return Results.Conflict("Pending tag already completed.");
+
+    // Create new Customer
+    var customer = new Customer
+    {
+        TagName = req.CustomerName,
+        FirstSeen = DateTime.UtcNow,
+        IsTagged = true
+    };
+    db.Customers.Add(customer);
+    await db.SaveChangesAsync(); // Get customer ID
+
+    // Update all WriterClassifications for this writer
+    var classifications = await db.WriterClassifications
+        .Where(wc => wc.WriterId == pendingTag.WriterId)
+        .ToListAsync();
+
+    foreach (var classification in classifications)
+    {
+        classification.CustomerId = customer.Id;
+    }
+
+    // Mark pending tag as completed
+    pendingTag.IsCompleted = true;
+    pendingTag.CompletedAt = DateTime.UtcNow;
+
     await db.SaveChangesAsync();
 
     return Results.Ok(new
     {
-        Cluster = new { cluster.Id, cluster.ClusterId, cluster.CustomerId },
-        alerts
+        Customer = customer,
+        UpdatedClassifications = classifications.Count,
+        CompletedPendingTag = pendingTag
     });
 })
-.WithName("TagCluster")
-.Produces(StatusCodes.Status200OK)
-.Produces<string>(StatusCodes.Status404NotFound)
-.Produces<string>(StatusCodes.Status409Conflict);
+.WithName("CompletePendingTag");
+
+// Add this to your Program.cs after the existing endpoints
+
+// Manual classification trigger (for testing)
+app.MapPost("/classify-now", async (ApplicationDbContext db, IHttpClientFactory httpFactory) =>
+{
+    var unclassified = await db.BetRecords
+        .Where(br => br.ImageData != null &&
+                   !db.WriterClassifications.Any(wc => wc.BetRecordId == br.Id))
+        .Take(10) // Limit for testing
+        .ToListAsync();
+
+    if (!unclassified.Any())
+        return Results.Ok(new { message = "No unclassified records found" });
+
+    // Call classification API
+    using var client = httpFactory.CreateClient();
+    using var content = new MultipartFormDataContent();
+
+    foreach (var bet in unclassified)
+    {
+        var imageContent = new ByteArrayContent(bet.ImageData);
+        imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+        content.Add(imageContent, "files", $"{bet.Id}.jpg");
+    }
+
+    try
+    {
+        var response = await client.PostAsync("http://localhost:8001/classify-anonymous", content);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            return Results.Problem($"Classification failed: {response.StatusCode} - {errorContent}");
+        }
+
+        var result = await response.Content.ReadFromJsonAsync<ClassificationApiResponse>();
+
+        // Save results
+        foreach (var classificationResult in result.Results)
+        {
+            var writerClassification = new WriterClassification
+            {
+                BetRecordId = classificationResult.SlipId,
+                WriterId = classificationResult.WriterId,
+                Confidence = classificationResult.Confidence,
+                ConfidenceLevel = classificationResult.ConfidenceLevel,
+                CreatedAt = DateTime.UtcNow
+            };
+            db.WriterClassifications.Add(writerClassification);
+        }
+        await db.SaveChangesAsync();
+
+        return Results.Ok(new
+        {
+            ClassificationsCreated = result.Results.Count,
+            Results = result.Results
+        });
+    }
+    catch (HttpRequestException ex)
+    {
+        return Results.Problem($"Network error calling classification API: {ex.Message}");
+    }
+    catch (TaskCanceledException ex)
+    {
+        return Results.Problem($"Classification API timeout: {ex.Message}");
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Classification error: {ex.Message}");
+    }
+})
+.WithName("ManualClassify");
+
+// Health check for the classification API
+app.MapGet("/health/classification", async (IHttpClientFactory httpFactory) =>
+{
+    try
+    {
+        using var client = httpFactory.CreateClient();
+        var response = await client.GetAsync("http://localhost:8001/health");
+
+        if (response.IsSuccessStatusCode)
+        {
+            var healthData = await response.Content.ReadFromJsonAsync<Dictionary<string, object>>();
+            return Results.Ok(new {
+                ClassificationAPI = "Healthy",
+                Details = healthData
+            });
+        }
+
+        return Results.Problem($"Classification API unhealthy: {response.StatusCode}");
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem($"Cannot reach classification API: {ex.Message}");
+    }
+})
+.WithName("ClassificationHealthCheck");
 
 // Manually remove a pending‐tag
 app.MapDelete("/pendingtags/{id}", async (int id, ApplicationDbContext db) =>
@@ -321,4 +412,38 @@ app.MapDelete("/pendingtags/{id}", async (int id, ApplicationDbContext db) =>
 .Produces(StatusCodes.Status204NoContent)
 .Produces<string>(StatusCodes.Status404NotFound);
 
+app.MapGet("/bets/{id}/slip", async (int id, ApplicationDbContext db) =>
+{
+    var bet = await db.BetRecords.FindAsync(id);
+    if (bet is null || bet.ImageData == null || bet.ImageData.Length == 0)
+        return Results.NotFound();
+
+    // You could inspect the first few bytes to guess PNG vs JPEG,
+    // but if you only allow those two types, JPEG is fine:
+    return Results.File(bet.ImageData, "image/jpeg", $"{id}.jpg");
+})
+.WithName("GetSlipImage")
+.Produces(StatusCodes.Status200OK)
+.Produces(StatusCodes.Status404NotFound);
+
 app.Run();
+
+// Response models for the classification API
+public class ClassificationApiResponse
+{
+    public List<ClassificationResult> Results { get; set; } = new();
+    public Dictionary<string, object> Summary { get; set; } = new();
+    public string Timestamp { get; set; } = string.Empty;
+}
+
+public class ClassificationResult
+{
+    public int SlipId { get; set; }
+    public int WriterId { get; set; }
+    public double Confidence { get; set; }
+    public string ConfidenceLevel { get; set; } = string.Empty;
+}
+
+public record CompletePendingTagRequest(string CustomerName);
+public record LoginRequest(string Username, string Password);
+

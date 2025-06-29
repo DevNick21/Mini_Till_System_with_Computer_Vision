@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Customers</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+  <!-- navbar -->
+  <div id="nav-container"></div>
+  <script>
+    fetch('navbar.html').then(r=>r.text()).then(html=>document.getElementById('nav-container').innerHTML=html);
+  </script>
+
+  <div class="container my-4">
+    <h2>Customers</h2>
+    <table class="table table-striped">
+      <thead>
+        <tr><th>Id</th><th>Tag</th><th>First Seen</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="custBody"></tbody>
+    </table>
+    <hr>
+    <h4>Add New Customer</h4>
+    <form id="addCustForm">
+      <div class="mb-3">
+        <label class="form-label">Tag Name</label>
+        <input class="form-control" name="tagName" placeholder="Enter customer tag name" required>
+      </div>
+      <buttonbutton type="submit" class="btn btn-success">Create</button>
+    </form>
+    <div id="custMsg" class="mt-2"></div>
+  </div>
+
+  <script>
+    const token = localStorage.getItem('jwt');
+
+    async function loadCustomers() {
+      let resp = await fetch('/customers', { headers:{Authorization:`Bearer ${token}`} });
+      let cs   = await resp.json();
+      const body = document.getElementById('custBody');
+      body.innerHTML = '';
+      cs.forEach(c=>{
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${c.id}</td>
+          <td>${c.tagName || ''}</td>
+          <td>${new Date(c.firstSeen).toLocaleDateString()}</td>
+          <td>
+            <button data-id="${c.id}" class="btn btn-sm btn-danger del-btn">Delete</button>
+          </td>`;
+        body.append(row);
+      });
+      document.querySelectorAll('.del-btn').forEach(btn=>{
+        btn.onclick = async ()=> {
+          await fetch(`/customers/${btn.dataset.id}`, {
+            method:'DELETE',
+            headers:{Authorization:`Bearer ${token}`}
+          });
+          loadCustomers();
+        };
+      });
+    }
+
+    document.getElementById('addCustForm').onsubmit = async e=>{
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const name = form.get('tagName');
+      const resp = await fetch('/customers', {
+        method:'POST',
+        headers:{
+          'Content-Type':'application/json',
+          Authorization:`Bearer ${token}`
+        },
+        body: JSON.stringify({ tagName: name })
+      });
+      document.getElementById('custMsg').textContent = resp.ok
+        ? 'Created!' : await resp.text();
+      loadCustomers();
+    };
+
+    loadCustomers();
+  </script>
+</body>
+</html>

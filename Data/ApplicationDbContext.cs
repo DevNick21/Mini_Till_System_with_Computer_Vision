@@ -12,31 +12,32 @@ namespace bet_fred.Data
         public DbSet<BetRecord> BetRecords { get; set; } = null!;
         public DbSet<Alert> Alerts { get; set; } = null!;
         public DbSet<PendingTag> PendingTags { get; set; } = null!;
-        public DbSet<HandwritingCluster> HandwritingClusters { get; set; } = null!;
         public DbSet<ThresholdRule> ThresholdRules { get; set; } = null!;
+        public DbSet<WriterClassification> WriterClassifications { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            // Seed a single global rule: £5 000 max daily spend
-            modelBuilder.Entity<ThresholdRule>().HasData(
-                new ThresholdRule
-                {
-                    Id = 1,
-                    Name = "Staked in a Day",
-                    Value = 500m,
-                    Period = TimeSpan.FromDays(1),
-                    CustomerId = null
-                }
-            );
-            modelBuilder.Entity<HandwritingCluster>()
-                .HasIndex(h => h.BetRecordId)
-                .IsUnique();
+            // Configure WriterClassification relationships
+            modelBuilder.Entity<WriterClassification>()
+                .HasOne(wc => wc.BetRecord)
+                .WithMany()
+                .HasForeignKey(wc => wc.BetRecordId)
+                .OnDelete(DeleteBehavior.Cascade);
 
-            modelBuilder.Entity<PendingTag>()
-                .HasIndex(t => t.Tag)
-                .IsUnique();
+            modelBuilder.Entity<WriterClassification>()
+                .HasOne(wc => wc.Customer)
+                .WithMany(c => c.WriterClassifications)
+                .HasForeignKey(wc => wc.CustomerId)
+                .OnDelete(DeleteBehavior.SetNull); // Keep classification if customer deleted
+
+            // Index for performance
+            modelBuilder.Entity<WriterClassification>()
+                .HasIndex(wc => wc.WriterId);
+
+            modelBuilder.Entity<WriterClassification>()
+                .HasIndex(wc => wc.Confidence);
         }
     }
 }

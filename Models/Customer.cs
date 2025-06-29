@@ -15,7 +15,7 @@ namespace bet_fred.Models
         public ICollection<BetRecord>? BetRecords { get; set; } = new List<BetRecord>();
         public ICollection<Alert>? Alerts { get; set; } = new List<Alert>();
         public ICollection<PendingTag> PendingTags { get; set; } = new List<PendingTag>();
-        public ICollection<HandwritingCluster> HandwritingClusters { get; set; } = new List<HandwritingCluster>();
+        public ICollection<WriterClassification> WriterClassifications { get; set; } = new List<WriterClassification>();
 
     }
 }

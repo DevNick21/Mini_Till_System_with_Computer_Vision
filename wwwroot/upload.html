@@ -1,77 +1,126 @@
 <!doctype html>
-<html lang="en"><head>
+<html lang="en">
+<head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>New Bet & Slip</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head><body>
-  <body>
-    <div id="nav-container"></div>
-    <script src="navbar.html" type="text/html"></script>
-    <script>
-      fetch('navbar.html').then(r=>r.text()).then(html=>document.getElementById('nav-container').innerHTML=html);
-    </script>
+</head>
+<body>
+  <!-- Navbar -->
+  <div id="nav-container"></div>
+  <script>
+    fetch('navbar.html')
+      .then(r => r.text())
+      .then(html => document.getElementById('nav-container').innerHTML = html);
+  </script>
+
+  <!-- Form -->
   <div class="container my-4">
     <h2>Upload Bet & Slip</h2>
     <form id="uploadForm" enctype="multipart/form-data">
       <div class="row gx-3">
+        <!-- Amount -->
         <div class="col-md-6 mb-3">
           <label for="amount" class="form-label">Amount</label>
           <input id="amount" name="amount" class="form-control" type="number" step="0.01" required>
         </div>
+        <!-- Sport -->
         <div class="col-md-6 mb-3">
           <label for="sport" class="form-label">Sport</label>
           <input id="sport" name="sport" class="form-control" type="text" required>
         </div>
+        <!-- Bet Type -->
         <div class="col-md-6 mb-3">
           <label for="betType" class="form-label">Bet Type</label>
           <input id="betType" name="betType" class="form-control" type="text" required>
         </div>
+        <!-- Slip Image -->
         <div class="col-md-6 mb-3">
           <label for="slip" class="form-label">Slip Image</label>
           <input id="slip" name="slip" class="form-control" type="file" accept="image/*" required>
         </div>
       </div>
-      <button class="btn btn-primary">Submit</button>
+
+      <!-- Preview -->
+      <div class="mb-3">
+        <label class="form-label">Preview</label><br>
+        <img id="slipPreview" style="max-width:300px; display:none;" />
+      </div>
+
+      <button type="submit" class="btn btn-primary">Submit</button>
     </form>
+
+    <!-- Message -->
     <div id="msg" class="mt-3"></div>
   </div>
 
   <script>
+    // 1) FileReader preview
+    const slipInput  = document.getElementById('slip');
+    const previewImg = document.getElementById('slipPreview');
+
+    slipInput.addEventListener('change', () => {
+      const file = slipInput.files[0];
+      if (!file) {
+        previewImg.style.display = 'none';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = e => {
+        previewImg.src = e.target.result;
+        previewImg.style.display = 'block';
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // 2) Submit handler
     document.getElementById('uploadForm').onsubmit = async e => {
       e.preventDefault();
       const token = localStorage.getItem('jwt');
-      const form = new FormData(e.target);
+      const form  = new FormData(e.target);
 
-      // 1) create Bet
-      let betResp = await fetch('/bets', {
-        method:'POST',
-        headers:{'Authorization':`Bearer ${token}`,},
+      // Create BetRecord
+     let betResp = await fetch('/bets', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
-          amount: parseFloat(form.get('amount')),
-          sport: form.get('sport'),
-          betType: form.get('betType')
+            amount: parseFloat(form.get('amount')),
+            sport:  form.get('sport'),
+            betType: form.get('betType')
         })
       });
       if (!betResp.ok) {
-        document.getElementById('msg').textContent = await betResp.text();
+        msg.textContent = await betResp.text();
         return;
       }
       const bet = await betResp.json();
 
-      // 2) upload slip
-      let slipForm = new FormData();
+      // Upload slip (note name 'slip')
+      const slipForm = new FormData();
       slipForm.append('file', form.get('slip'));
-      let slipResp = await fetch(`/bets/${bet.id}/slip`, {
-        method:'POST',
-        headers:{'Authorization':`Bearer ${token}`},
+      const slipResp = await fetch(`/bets/${bet.id}/slip`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
         body: slipForm
       });
+
+      const msg = document.getElementById('msg');
       if (!slipResp.ok) {
-        document.getElementById('msg').textContent = await slipResp.text();
+        msg.textContent = await slipResp.text();
         return;
       }
-      document.getElementById('msg').textContent = 'Uploaded successfully!';
+
+      // On success, show the server-served image
+      previewImg.src = `/bets/${bet.id}/slip`;
+      previewImg.style.display = 'block';
+      msg.textContent = 'Uploaded successfully!';
+      document.getElementById('uploadForm').reset();
+      previewImg.style.display = 'none';
     };
   </script>
-</body></html>
+</body>
+</html>
