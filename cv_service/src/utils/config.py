@@ -23,7 +23,7 @@ DROPOUT_RATE = 0.3
 # Data paths
 SLIPS_DIR = "slips"
 MODEL_SAVE_PATH = "trained_models"
-BEST_MODEL_NAME = "best_handwriting_classifier.pth"
+BEST_MODEL_NAME = "best_efficientnet_classifier.pth"
 
 # Create model directory if it doesn't exist
 os.makedirs(MODEL_SAVE_PATH, exist_ok=True)

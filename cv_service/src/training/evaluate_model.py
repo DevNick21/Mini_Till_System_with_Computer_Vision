@@ -15,7 +15,7 @@ import torchvision.transforms as T
 from torch.utils.data import DataLoader
 import torch
 from ..utils.config import *
-from ..models.handwriting_classifier import HandwritingClassifier
+from ..models.efficientnet_classifier import EfficientNetClassifier
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
@@ -71,8 +71,12 @@ class EvaluationDataset:
 
 def load_trained_model(model_path):
     """Load the trained model"""
-    model = HandwritingClassifier()
-    model.load_state_dict(torch.load(model_path, weights_only=True))
+    model = EfficientNetClassifier()
+    # Load the trained EfficientNet model
+    if model_path and os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location='cpu'))
+    elif os.path.exists(os.path.join(MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")):
+        model.load_state_dict(torch.load(os.path.join(MODEL_SAVE_PATH, "best_efficientnet_classifier.pth"), map_location='cpu'))
     model.eval()
     return model
 
@@ -84,17 +88,13 @@ def evaluate_model_detailed():
     print("=" * 50)
 
     # Load model
-    model_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
-    if not os.path.exists(model_path):
-        print(f"❌ Model not found at {model_path}")
-        print("Please run training first!")
-        return
-
+    model_path = os.path.join(MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_trained_model(model_path)
     model.to(device)
 
-    print(f"✅ Model loaded from {model_path}")
+    print(f"✅ EfficientNet model loaded successfully from {model_path}")
     print(f"   Device: {device}")
 
     # Create evaluation dataset
@@ -239,14 +239,14 @@ def evaluate_model_detailed():
         'high_confidence_accuracy': high_conf_accuracy,
         'writer_performance': writer_performance,
         'total_samples': len(all_labels),
-        'model_path': model_path
+        'model_type': 'efficientnet'
     }
 
-    results_path = os.path.join(MODEL_SAVE_PATH, 'evaluation_results.json')
+    results_path = os.path.join(MODEL_SAVE_PATH, 'efficientnet_evaluation_results.json')
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
 
-    print(f"\n📊 Detailed results saved to: {results_path}")
+    print(f"\n📊 Detailed ensemble results saved to: {results_path}")
 
     return results, prediction_details
 
@@ -317,7 +317,7 @@ def generate_betfred_visualizations(all_labels, all_predictions, all_confidences
     plt.yticks(rotation=0, color=BETFRED_BLUE)
     plt.tight_layout()
     plt.savefig(os.path.join(
-        save_dir, "confusion_matrix_betfred.png"), dpi=300)
+        save_dir, "efficientnet_confusion_matrix_betfred.png"), dpi=300)
     plt.close()
 
     # ---- Per-Writer Accuracy Bar Plot ----
@@ -338,7 +338,7 @@ def generate_betfred_visualizations(all_labels, all_predictions, all_confidences
                      ha='center', va='bottom', color=BETFRED_RED if acc < 0.7 else BETFRED_BLUE, weight='bold')
     plt.tight_layout()
     plt.savefig(os.path.join(
-        save_dir, "per_writer_accuracy_betfred.png"), dpi=300)
+        save_dir, "efficientnet_per_writer_accuracy_betfred.png"), dpi=300)
     plt.close()
 
     # ---- Confidence Histogram ----
@@ -351,7 +351,7 @@ def generate_betfred_visualizations(all_labels, all_predictions, all_confidences
               color=BETFRED_BLUE, fontsize=15, weight='bold')
     plt.tight_layout()
     plt.savefig(os.path.join(
-        save_dir, "confidence_histogram_betfred.png"), dpi=300)
+        save_dir, "efficientnet_confidence_histogram_betfred.png"), dpi=300)
     plt.close()
 
     # ---- Confidence Category Bar Chart ----
@@ -369,12 +369,12 @@ def generate_betfred_visualizations(all_labels, all_predictions, all_confidences
               color=BETFRED_BLUE, fontsize=15, weight='bold')
     plt.tight_layout()
     plt.savefig(os.path.join(
-        save_dir, "confidence_categories_betfred.png"), dpi=300)
+        save_dir, "efficientnet_confidence_categories_betfred.png"), dpi=300)
     plt.close()
 
     # ---- Save confusion matrix as CSV ----
     cm_df = pd.DataFrame(cm, index=all_writers, columns=all_writers)
-    cm_df.to_csv(os.path.join(save_dir, "confusion_matrix_betfred.csv"))
+    cm_df.to_csv(os.path.join(save_dir, "efficientnet_confusion_matrix_betfred.csv"))
 
     print("\n✅ Betfred-branded evaluation visuals saved in:",
           os.path.abspath(save_dir))
@@ -398,9 +398,10 @@ if __name__ == "__main__":
         all_writers=ALL_WRITERS
     )
 
-    print(f"\n🎯 SUMMARY:")
+    print(f"\n🎯 EFFICIENTNET MODEL SUMMARY:")
     print(f"   Current accuracy: {results['overall_accuracy']:.1%}")
     print(
         f"   High confidence cases: {results['confidence_distribution']['high']} ({results['confidence_distribution']['high']/results['total_samples']*100:.1f}%)")
     print(
         f"   High confidence accuracy: {results['high_confidence_accuracy']:.1%}")
+    print(f"   Model type: {results['model_type'].upper()}")

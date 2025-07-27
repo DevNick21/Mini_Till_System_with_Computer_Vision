@@ -1,18 +1,18 @@
 """
-Handwriting classifier model using ResNet18 backbone
+EfficientNet-based handwriting classifier model
 """
 import torch
 import torch.nn as nn
-from torchvision.models import resnet18
+from torchvision.models import efficientnet_b0
 from ..utils.config import ALL_WRITERS, DROPOUT_RATE
 
 
-class HandwritingClassifier(nn.Module):
+class EfficientNetClassifier(nn.Module):
     """
-    CNN-based handwriting classifier
+    CNN-based handwriting classifier using EfficientNet backbone
 
     Architecture:
-    - ResNet18 backbone (pre-trained on ImageNet)
+    - EfficientNet-B0 backbone (pre-trained on ImageNet)
     - Custom classification head for writer identification
     - With Dropout for regularization
     """
@@ -28,33 +28,35 @@ class HandwritingClassifier(nn.Module):
 
         self.num_writers = num_writers
 
-        # Pre-trained ResNet18 backbone (without final layer)
-        backbone = resnet18(weights='DEFAULT')
+        # Pre-trained EfficientNet backbone (without final layer)
+        backbone = efficientnet_b0(weights='DEFAULT')
+
+        # Remove the classifier
         self.features = nn.Sequential(*list(backbone.children())[:-1])
 
-        # Custom classification head
+        # Custom classification head - EfficientNet B0 has 1280 features
         self.classifier = nn.Sequential(
             nn.Flatten(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(1280, 512),
+            nn.ReLU(),
+            nn.BatchNorm1d(512),
             nn.Dropout(dropout_rate),
             nn.Linear(512, 256),
             nn.ReLU(),
             nn.BatchNorm1d(256),
             nn.Dropout(dropout_rate),
-            nn.Linear(256, 128),
-            nn.ReLU(),
-            nn.BatchNorm1d(128),
-            nn.Dropout(dropout_rate),
-            nn.Linear(128, num_writers)
+            nn.Linear(256, num_writers)
         )
 
-        print(f"HandwritingClassifier initialized:")
+        print(f"EfficientNetClassifier initialized:")
         print(f"  Writers: {num_writers}")
         print(f"  Dropout rate: {dropout_rate}")
         print(f"  Parameters: {sum(p.numel() for p in self.parameters()):,}")
 
     def forward(self, x):
         """Forward pass through the network"""
-        # Extract features using ResNet18 backbone
+        # Extract features using EfficientNet backbone
         features = self.features(x)
 
         # Classify using custom head
@@ -78,7 +80,7 @@ class HandwritingClassifier(nn.Module):
 # Test the model
 if __name__ == "__main__":
     # Test model creation
-    model = HandwritingClassifier()
+    model = EfficientNetClassifier()
 
     # Test with dummy input (batch_size=1, channels=3, height=224, width=224)
     dummy_input = torch.randn(1, 3, 224, 224)

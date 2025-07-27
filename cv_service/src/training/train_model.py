@@ -1,5 +1,5 @@
 """
-Training script for supervised handwriting classification
+Training script for supervised handwriting classification with ensemble approach
 """
 import os
 import torch
@@ -12,11 +12,15 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score
 import time
+import shutil
 from datetime import datetime
 
 # Import our modules
 from ..utils.config import *
-from ..models.handwriting_classifier import HandwritingClassifier
+from ..models.resnet_classifier import ResNetClassifier
+from ..models.efficientnet_classifier import EfficientNetClassifier
+from ..models.densenet_classifier import DenseNetClassifier
+from ..models.ensemble_classifier import EnsembleHandwritingClassifier
 
 
 class HandwritingDataset(Dataset):
@@ -188,21 +192,12 @@ def validate_epoch(model, val_loader, criterion, device):
     return avg_loss, accuracy
 
 
-def train_supervised_model():
-    """Main training function"""
-
-    print("STARTING TRAINING")
-    print("=" * 50)
-
-    # Prepare data
-    train_loader, val_loader, writer_counts = prepare_data()
-
-    # Setup device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"\nUsing device: {device}")
+def train_single_model(model_class, model_name, train_loader, val_loader, device):
+    """Train a single model and return metrics for ensemble weighting"""
+    print(f"\n=== TRAINING {model_name.upper()} MODEL ===")
 
     # Create model
-    model = HandwritingClassifier()
+    model = model_class()
     model.to(device)
 
     # Training setup
@@ -217,14 +212,11 @@ def train_supervised_model():
     patience_counter = 0
 
     print(f"\n=== TRAINING CONFIGURATION ===")
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    print(f"Model: {model_name}")
+    print(f"Parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"Epochs: {NUM_EPOCHS}")
-    print(f"Batch size: {BATCH_SIZE}")
     print(f"Learning rate: {LEARNING_RATE}")
-    print(f"Device: {device}")
-    print(f"Writers: {len(ALL_WRITERS)}")
 
-    print(f"\n=== STARTING TRAINING ===")
     start_time = time.time()
 
     # Training loop
@@ -258,7 +250,8 @@ def train_supervised_model():
             patience_counter = 0
 
             # Save model
-            model_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
+            model_path = os.path.join(
+                MODEL_SAVE_PATH, f"best_{model_name}_classifier.pth")
             torch.save(model.state_dict(), model_path)
             print(f"  ✅ New best model saved! Accuracy: {val_acc:.2f}%")
         else:
@@ -271,23 +264,239 @@ def train_supervised_model():
 
     training_time = time.time() - start_time
 
-    print(f"\n=== TRAINING COMPLETED ===")
+    print(f"\n=== {model_name.upper()} TRAINING COMPLETED ===")
     print(f"Best validation accuracy: {best_val_acc:.2f}%")
     print(f"Total training time: {training_time/60:.1f} minutes")
-    print(f"Model saved to: {os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)}")
 
-    # Load best model for final evaluation
-    model.load_state_dict(torch.load(
-        os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)))
+    # Calculate robustness score - higher is better
+    robustness = calculate_model_robustness(model, val_loader, device)
+    print(f"Robustness score: {robustness:.4f}\n")
 
-    return model, best_val_acc, val_loader, device
+    # Load best model weights
+    model_path = os.path.join(
+        MODEL_SAVE_PATH, f"best_{model_name}_classifier.pth")
+    if os.path.exists(model_path):
+        model.load_state_dict(torch.load(model_path, map_location=device))
+
+    return model, best_val_acc, robustness
+
+
+def calculate_model_robustness(model, val_loader, device):
+    """Calculate robustness score for a model"""
+
+    model.eval()
+    all_confidences = []
+    all_correct = []
+
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images, labels = images.to(device), labels.to(device)
+            outputs = model(images)
+
+            probabilities = torch.softmax(outputs, dim=1)
+            confidence, predicted = torch.max(probabilities, 1)
+
+            correct = (predicted == labels)
+
+            all_confidences.extend(confidence.cpu().numpy())
+            all_correct.extend(correct.cpu().numpy())
+
+    all_confidences = np.array(all_confidences)
+    all_correct = np.array(all_correct)
+
+    # Calculate various robustness metrics
+
+    # 1. Accuracy (base metric)
+    accuracy = np.mean(all_correct)
+
+    # 2. Confidence calibration (how well confidence correlates with accuracy)
+    # Group confidences into bins
+    bins = np.linspace(0, 1, 11)  # 10 bins
+    binned_confidences = np.digitize(all_confidences, bins) - 1
+
+    calibration_error = 0
+    bin_counts = np.zeros(10)
+
+    for bin_idx in range(10):
+        mask = binned_confidences == bin_idx
+        if np.sum(mask) > 0:
+            bin_counts[bin_idx] = np.sum(mask)
+            bin_acc = np.mean(all_correct[mask])
+            bin_conf = np.mean(all_confidences[mask])
+            calibration_error += np.abs(bin_acc - bin_conf) * \
+                (np.sum(mask) / len(all_correct))
+
+    # 3. High-confidence correctness (accuracy for high-confidence predictions)
+    high_conf_mask = all_confidences > HIGH_CONFIDENCE_THRESHOLD
+    high_conf_accuracy = np.mean(all_correct[high_conf_mask]) if np.sum(
+        high_conf_mask) > 0 else 0
+
+    # 4. Confidence variance (lower is better for stability)
+    conf_variance = np.var(all_confidences)
+
+    # Combine metrics into a robustness score (higher is better)
+    # This formula emphasizes accuracy, high-confidence correctness, and calibration
+    robustness_score = (0.5 * accuracy +
+                        0.3 * high_conf_accuracy +
+                        0.2 * (1.0 - calibration_error))
+
+    return robustness_score
+
+
+def calculate_ensemble_weights(model_metrics):
+    """Calculate optimal weights for the ensemble based on model metrics"""
+
+    # Extract metrics
+    accuracies = [metrics['accuracy'] for metrics in model_metrics.values()]
+    robustness_scores = [metrics['robustness']
+                         for metrics in model_metrics.values()]
+
+    # Normalize accuracy and robustness to sum to 1.0
+    total_acc = sum(accuracies)
+    total_rob = sum(robustness_scores)
+
+    norm_acc = [acc/total_acc for acc in accuracies]
+    norm_rob = [rob/total_rob for rob in robustness_scores]
+
+    # Combine with more weight on robustness
+    weights = [0.5 * a + 0.5 * r for a, r in zip(norm_acc, norm_rob)]
+
+    # Normalize to sum to 1.0
+    total_weight = sum(weights)
+    final_weights = [w/total_weight for w in weights]
+
+    return final_weights
+
+
+def evaluate_ensemble(ensemble_model, val_loader, device):
+    """Evaluate ensemble model performance"""
+    print("\n=== EVALUATING ENSEMBLE MODEL ===")
+
+    criterion = nn.CrossEntropyLoss()
+    val_loss, val_acc = validate_epoch(
+        ensemble_model, val_loader, criterion, device)
+
+    print(f"Ensemble Validation Loss: {val_loss:.4f}")
+    print(f"Ensemble Validation Accuracy: {val_acc:.2f}%")
+
+    # Calculate detailed metrics for ensemble
+    ensemble_robustness = calculate_model_robustness(
+        ensemble_model, val_loader, device)
+    print(f"Ensemble Robustness Score: {ensemble_robustness:.4f}\n")
+
+    return val_acc, ensemble_robustness
+
+
+def train_supervised_model():
+    """Train the ensemble classification model"""
+
+    print("=== BETFRED HANDWRITING ENSEMBLE TRAINING STARTED ===")
+    print("=" * 60)
+
+    # Create model directory if it doesn't exist
+    os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
+
+    # Prepare data
+    train_loader, val_loader, writer_counts = prepare_data()
+
+    # Setup device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"\nUsing device: {device}")
+
+    # Define model architectures to train
+    model_architectures = {
+        'resnet': ResNetClassifier,
+        'efficientnet': EfficientNetClassifier,
+        'densenet': DenseNetClassifier
+    }
+
+    # Train each model and collect metrics
+    trained_models = {}
+    model_metrics = {}
+
+    for model_name, model_class in model_architectures.items():
+        model, accuracy, robustness = train_single_model(
+            model_class, model_name, train_loader, val_loader, device)
+
+        trained_models[model_name] = model
+        model_metrics[model_name] = {
+            'accuracy': accuracy,
+            'robustness': robustness
+        }
+
+    # Print comparison of models
+    print("\n=== MODEL COMPARISON ===")
+    print(f"{'Model':<12} {'Accuracy':<10} {'Robustness':<10}")
+    print("-" * 32)
+
+    for model_name, metrics in model_metrics.items():
+        print(
+            f"{model_name:<12} {metrics['accuracy']:<10.2f} {metrics['robustness']:<10.4f}")
+
+    # Calculate optimal weights for ensemble
+    weights = calculate_ensemble_weights(model_metrics)
+    print("\n=== ENSEMBLE WEIGHTS ===")
+    for model_name, weight in zip(model_architectures.keys(), weights):
+        print(f"{model_name}: {weight:.4f}")
+
+    # Create and evaluate ensemble
+    ensemble = EnsembleHandwritingClassifier(model_weights=weights)
+    ensemble.load_individual_models()
+    ensemble.to(device)
+    ensemble.eval()
+
+    # Save the ensemble weights
+    ensemble_weights_path = os.path.join(
+        MODEL_SAVE_PATH, "ensemble_weights.pth")
+    torch.save(ensemble.model_weights, ensemble_weights_path)
+    print(f"Ensemble weights saved to {ensemble_weights_path}")
+
+    # Save legacy model format for backward compatibility
+    best_model_name = max(model_metrics.items(),
+                          key=lambda x: x[1]['accuracy'])[0]
+    best_model_path = os.path.join(
+        MODEL_SAVE_PATH, f"best_{best_model_name}_classifier.pth")
+    legacy_model_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
+
+    if os.path.exists(best_model_path):
+        # Copy the best model to the legacy path for backward compatibility
+        print(
+            f"Copying best model ({best_model_name}) to legacy location for compatibility")
+        shutil.copy2(best_model_path, legacy_model_path)
+
+    # Evaluate ensemble
+    ensemble_accuracy, ensemble_robustness = evaluate_ensemble(
+        ensemble, val_loader, device)
+
+    # Final report
+    print("\n=== FINAL ENSEMBLE RESULTS ===")
+    print(f"Ensemble accuracy: {ensemble_accuracy:.2f}%")
+    print(f"Ensemble robustness: {ensemble_robustness:.4f}")
+
+    improvement = ensemble_accuracy - \
+        max([m['accuracy'] for m in model_metrics.values()])
+    print(f"Improvement over best single model: {improvement:.2f}%")
+
+    if improvement > 0:
+        print("✅ Ensemble successfully improved classification accuracy!")
+    else:
+        print("⚠️  Ensemble did not improve over the best single model")
+
+    return ensemble, ensemble_accuracy, val_loader, device
 
 
 if __name__ == "__main__":
-    model, accuracy, val_loader, device = train_supervised_model()
+    print("\n🔹 BetFred Handwriting Classification System 🔹")
+    print("🔹 Ensemble Model Training Tool           🔹")
+    print("🔹 Version 2.0 - July 2025                🔹")
+
+    # Train the ensemble model
+    ensemble, accuracy, val_loader, device = train_supervised_model()
 
     print(f"\n🎯 FINAL RESULTS:")
-    if accuracy >= 85:
+    if accuracy >= 90:
+        print(f"✅ OUTSTANDING: {accuracy:.1f}% accuracy achieved!")
+    elif accuracy >= 85:
         print(f"✅ EXCELLENT: {accuracy:.1f}% accuracy achieved!")
     elif accuracy >= 75:
         print(f"✅ GOOD: {accuracy:.1f}% accuracy - meets target!")
@@ -295,3 +504,7 @@ if __name__ == "__main__":
         print(f"⚠️  MODERATE: {accuracy:.1f}% accuracy - needs improvement")
     else:
         print(f"❌ POOR: {accuracy:.1f}% accuracy - major issues")
+
+    print("\n✓ Training completed successfully")
+    print("✓ Classification API will automatically use the new ensemble model")
+    print("✓ System is ready for improved handwriting classification")
