@@ -1,27 +1,25 @@
 """
 Detailed evaluation of the trained handwriting classifier
+
 """
 # Set matplotlib backend BEFORE any other imports that might use it
+from ..utils.config import *
+from ..models.efficientnet_classifier import EfficientNetClassifier
 import sys
+import os
 import pandas as pd
 import json
 from collections import defaultdict, Counter
 import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-import os
 import numpy as np
 import cv2
 import torchvision.transforms as T
 from torch.utils.data import DataLoader
 import torch
-from ..utils.config import *
-from ..models.efficientnet_classifier import EfficientNetClassifier
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
-
-# Import our modules
-sys.path.append('..')
 
 
 class EvaluationDataset:
@@ -76,7 +74,8 @@ def load_trained_model(model_path):
     if model_path and os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path, map_location='cpu'))
     elif os.path.exists(os.path.join(MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")):
-        model.load_state_dict(torch.load(os.path.join(MODEL_SAVE_PATH, "best_efficientnet_classifier.pth"), map_location='cpu'))
+        model.load_state_dict(torch.load(os.path.join(
+            MODEL_SAVE_PATH, "best_efficientnet_classifier.pth"), map_location='cpu'))
     model.eval()
     return model
 
@@ -88,8 +87,9 @@ def evaluate_model_detailed():
     print("=" * 50)
 
     # Load model
-    model_path = os.path.join(MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")
-    
+    model_path = os.path.join(
+        MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = load_trained_model(model_path)
     model.to(device)
@@ -242,7 +242,8 @@ def evaluate_model_detailed():
         'model_type': 'efficientnet'
     }
 
-    results_path = os.path.join(MODEL_SAVE_PATH, 'efficientnet_evaluation_results.json')
+    results_path = os.path.join(
+        MODEL_SAVE_PATH, 'efficientnet_evaluation_results.json')
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
 
@@ -374,7 +375,8 @@ def generate_betfred_visualizations(all_labels, all_predictions, all_confidences
 
     # ---- Save confusion matrix as CSV ----
     cm_df = pd.DataFrame(cm, index=all_writers, columns=all_writers)
-    cm_df.to_csv(os.path.join(save_dir, "efficientnet_confusion_matrix_betfred.csv"))
+    cm_df.to_csv(os.path.join(
+        save_dir, "efficientnet_confusion_matrix_betfred.csv"))
 
     print("\n✅ Betfred-branded evaluation visuals saved in:",
           os.path.abspath(save_dir))

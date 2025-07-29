@@ -1,30 +1,42 @@
-using System;
 using System.ComponentModel.DataAnnotations;
 
 namespace bet_fred.Models
 {
+    /// <summary>
+    /// Configurable business rules for fraud detection threshold monitoring
+    /// </summary>
     public class ThresholdRule
     {
-        [Key]
         public int Id { get; set; }
 
         [Required]
         [StringLength(100)]
-        public string Name { get; set; } = string.Empty;  
-        // e.g. "MaxDailySpend", "MaxBetsPerHour"
+        public string Name { get; set; } = string.Empty;
 
-        [Required]
-        public decimal Value { get; set; }              
-        // numeric threshold (e.g. 100.00 GBP)
+        [StringLength(500)]
+        public string Description { get; set; } = string.Empty;
 
-        [Required]
-        public TimeSpan Period { get; set; } = TimeSpan.FromDays(1);
-        // the window over which Value applies
+        /// <summary>
+        /// The threshold value to monitor against
+        /// </summary>
+        public decimal Value { get; set; }
 
-        // optional: link to a Customer if you want per-customer overrides
-        public int? CustomerId { get; set; }
-        // navigation prop if you do link per-customer
-        // [ForeignKey(nameof(CustomerId))]
-        // public Customer? Customer { get; set; }
+        /// <summary>
+        /// Time window in minutes for the rule evaluation
+        /// </summary>
+        public int TimeWindowMinutes { get; set; } = 1440; // 24 hours default
+
+        /// <summary>
+        /// Whether this rule is currently active
+        /// </summary>
+        public bool IsActive { get; set; } = true;
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// Type of threshold rule (DailyStake, DailyLoss, DailyBetCount, etc.)
+        /// </summary>
+        [StringLength(50)]
+        public string RuleType { get; set; } = string.Empty;
     }
 }

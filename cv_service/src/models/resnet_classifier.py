@@ -1,5 +1,7 @@
 """
 ResNet18-based handwriting classifier model
+@deprecated: This model is retained for backwards compatibility but is no longer used in the main API.
+            We now use EfficientNet as primary model with DenseNet as fallback.
 """
 import torch
 import torch.nn as nn

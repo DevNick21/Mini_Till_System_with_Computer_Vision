@@ -22,25 +22,14 @@ current_dir = Path(__file__).parent
 src_dir = current_dir / "src"
 sys.path.append(str(src_dir))
 
-# Import demo configuration
-try:
-    from demo_config import DEMO_WRITERS, DEMO_CONFIDENCE_THRESHOLD, WRITER_DISPLAY_NAMES
-    DEMO_MODE = True
-    print(
-        f"Running in DEMO MODE with {len(DEMO_WRITERS)} writers: {DEMO_WRITERS}")
-except ImportError:
-    DEMO_MODE = False
-    DEMO_WRITERS = list(range(1, 14))  # Default to all writers (1-13)
-    DEMO_CONFIDENCE_THRESHOLD = 0.75
-    WRITER_DISPLAY_NAMES = {i: f"Writer {i}" for i in range(1, 14)}
+# Default writer display names
+WRITER_DISPLAY_NAMES = {i: f"Writer {i}" for i in range(1, 14)}
 
 # Import models and config
 try:
-    from src.models.resnet_classifier import ResNetClassifier
-    from src.models.ensemble_classifier import EnsembleHandwritingClassifier
-    from src.models.efficientnet_classifier import EfficientNetClassifier
-    from src.models.densenet_classifier import DenseNetClassifier
-    from src.utils.config import *
+    # Import models and utils with improved structure
+    from src.models import EfficientNetClassifier, DenseNetClassifier
+    from src.utils import *
 except ImportError as e:
     print(f"❌ Import error: {e}")
     print("Please ensure your model and config files are in the correct location")
@@ -89,14 +78,16 @@ def initialize_model():
         logger.info(f"Using device: {_device}")
 
         # Check if the EfficientNet model is available
-        efficientnet_path = os.path.join(MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")
+        efficientnet_path = os.path.join(
+            MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")
 
         # Try to load EfficientNet model first
         if os.path.exists(efficientnet_path):
             try:
                 logger.info("EfficientNet model found, using as primary model")
                 _model = EfficientNetClassifier(num_writers=len(ALL_WRITERS))
-                _model.load_state_dict(torch.load(efficientnet_path, map_location=_device))
+                _model.load_state_dict(torch.load(
+                    efficientnet_path, map_location=_device))
                 _model.to(_device)
                 _model.eval()
                 model_path = efficientnet_path
@@ -105,28 +96,33 @@ def initialize_model():
                 logger.error(f"✗ Error loading EfficientNet model: {e}")
                 _model = None
         else:
-            logger.warning("⚠️  EfficientNet model not found, checking for legacy model")
+            logger.warning(
+                "⚠️  EfficientNet model not found, checking for legacy model")
             _model = None
-            
+
         # If EfficientNet initialization failed, fall back to the DenseNet model
         if _model is None:
             logger.info("Loading DenseNet model as fallback...")
-            densenet_path = os.path.join(MODEL_SAVE_PATH, "best_densenet_classifier.pth")
-            
+            densenet_path = os.path.join(
+                MODEL_SAVE_PATH, "best_densenet_classifier.pth")
+
             if os.path.exists(densenet_path):
                 try:
                     # Try to load DenseNet model
                     _model = DenseNetClassifier(num_writers=len(ALL_WRITERS))
-                    _model.load_state_dict(torch.load(densenet_path, map_location=_device))
+                    _model.load_state_dict(torch.load(
+                        densenet_path, map_location=_device))
                     _model.to(_device)
                     _model.eval()
                     model_path = densenet_path
-                    logger.info("DenseNet model loaded successfully as fallback")
+                    logger.info(
+                        "DenseNet model loaded successfully as fallback")
                 except Exception as e:
                     logger.error(f"✗ Error loading DenseNet model: {e}")
                     raise
             else:
-                raise FileNotFoundError(f"No models found in {MODEL_SAVE_PATH}")
+                raise FileNotFoundError(
+                    f"No models found in {MODEL_SAVE_PATH}")
 
             # This section has been moved up above
 
@@ -155,6 +151,7 @@ async def startup_event():
     logger.info("Starting BetFred Classification API...")
     initialize_model()
     logger.info("API ready for classification requests")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -268,7 +265,7 @@ async def classify_handwriting(files: List[UploadFile] = File(...)):
                     f"Model prediction: writer_id={writer_id} ({writer_display}), confidence={confidence_score:.3f}")
 
                 # In demo mode, use a potentially lower confidence threshold
-                threshold = DEMO_CONFIDENCE_THRESHOLD if DEMO_MODE else 0.75
+                threshold = DEMO_CONFIDENCE_BASE if DEMO_MODE else 0.75
 
                 # Determine confidence level for business logic
                 if confidence_score >= 0.9:
@@ -348,13 +345,13 @@ async def get_model_info():
 
     # If in demo mode, only report the demo writers
     writer_ids = DEMO_WRITERS if DEMO_MODE else list(range(1, 14))
-    threshold = DEMO_CONFIDENCE_THRESHOLD if DEMO_MODE else 0.75
+    threshold = DEMO_CONFIDENCE_BASE if DEMO_MODE else 0.75
 
     # Get model type
     if isinstance(_model, EfficientNetClassifier):
         model_type = "EfficientNetClassifier"
     elif isinstance(_model, DenseNetClassifier):
-        model_type = "DenseNetClassifier" 
+        model_type = "DenseNetClassifier"
     else:
         model_type = "ResNetClassifier"
 
@@ -383,7 +380,7 @@ async def get_demo_status():
         "demo_mode": DEMO_MODE,
         "available_writers": DEMO_WRITERS,
         "writer_names": {str(k): v for k, v in WRITER_DISPLAY_NAMES.items() if k in DEMO_WRITERS},
-        "confidence_threshold": DEMO_CONFIDENCE_THRESHOLD,
+        "confidence_threshold": DEMO_CONFIDENCE_BASE,
         "sample_bet_slips": [f"slips/{WRITER_DISPLAY_NAMES[wid].lower().replace(' ', '_')}.jpg" for wid in DEMO_WRITERS if wid in WRITER_DISPLAY_NAMES],
         "instructions": "Use these sample bet slips for your demo to ensure correct classification."
     }
@@ -394,7 +391,7 @@ async def root():
     """API root - basic info"""
     demo_info = " (DEMO MODE)" if DEMO_MODE else ""
     writers_info = f"{len(DEMO_WRITERS)} writers" if DEMO_MODE else "13 writers"
-    
+
     # Get actual model type
     if _model is None:
         model_type = "Unknown"

@@ -1,15 +1,17 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Logging;
 using bet_fred.Data;
 using bet_fred.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace bet_fred.Services
 {
-    public class ThresholdEvaluator
+    public interface IThresholdEvaluator
+    {
+        Task<IEnumerable<Alert>> EvaluateThresholdsAsync();
+        Task<IEnumerable<Alert>> EvaluateThresholdsForCustomerAsync(int customerId);
+        Task<bool> ProcessBetForThresholdsAsync(BetRecord bet);
+    }
+
+    public class ThresholdEvaluator : IThresholdEvaluator
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<ThresholdEvaluator> _logger;
@@ -21,204 +23,221 @@ namespace bet_fred.Services
         }
 
         /// <summary>
-        /// Evaluate thresholds for both untagged writers and tagged customers
+        /// Evaluates all active threshold rules against all customers
         /// </summary>
-        public async Task<(int pendingTags, int alerts)> EvaluateAllThresholdsAsync()
+        /// <returns>Generated alerts from threshold violations</returns>
+        public async Task<IEnumerable<Alert>> EvaluateThresholdsAsync()
         {
-            var pendingTagsCreated = await EvaluateWriterThresholdsAsync();
-            var alertsCreated = await EvaluateCustomerThresholdsAsync();
+            _logger.LogInformation("Evaluating thresholds for all customers");
+            var generatedAlerts = new List<Alert>();
 
-            return (pendingTagsCreated, alertsCreated);
+            try
+            {
+                // Get all active rules
+                var activeRules = await _context.ThresholdRules
+                    .Where(r => r.IsActive)
+                    .ToListAsync();
+
+                if (!activeRules.Any())
+                {
+                    _logger.LogInformation("No active threshold rules found");
+                    return generatedAlerts;
+                }
+
+                // Get all customers
+                var customers = await _context.Customers.ToListAsync();
+
+                foreach (var customer in customers)
+                {
+                    var customerAlerts = await EvaluateThresholdsForCustomerAsync(customer.Id);
+                    generatedAlerts.AddRange(customerAlerts);
+                }
+
+                _logger.LogInformation("Threshold evaluation complete. Generated {AlertCount} alerts", generatedAlerts.Count);
+                return generatedAlerts;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error evaluating thresholds");
+                return generatedAlerts;
+            }
         }
 
         /// <summary>
-        /// Evaluate thresholds for untagged writers → Create PendingTags
+        /// Evaluates all active threshold rules for a specific customer
         /// </summary>
-        public async Task<int> EvaluateWriterThresholdsAsync()
+        /// <param name="customerId">Customer ID to evaluate</param>
+        /// <returns>Generated alerts from threshold violations</returns>
+        public async Task<IEnumerable<Alert>> EvaluateThresholdsForCustomerAsync(int customerId)
         {
-            _logger.LogInformation("Evaluating writer thresholds for untagged classifications...");
+            _logger.LogInformation("Evaluating thresholds for customer {CustomerId}", customerId);
+            var generatedAlerts = new List<Alert>();
 
-            var today = DateTime.Today;
-            var tomorrow = today.AddDays(1);
-
-            // Get all threshold rules
-            var thresholdRules = await _context.ThresholdRules.ToListAsync();
-
-            // Get untagged writer classifications (confidence ≥ 0.75) for today
-            var writerData = await _context.WriterClassifications
-                .Where(wc => wc.CustomerId == null && // Untagged
-                           wc.Confidence >= 0.75 && // Confidence ≥ 0.75
-                           wc.BetRecord.PlacedAt >= today &&
-                           wc.BetRecord.PlacedAt < tomorrow)
-                .Include(wc => wc.BetRecord)
-                .GroupBy(wc => wc.WriterId)
-                .Select(g => new
-                {
-                    WriterId = g.Key,
-                    Classifications = g.ToList(),
-                    TotalStake = g.Sum(wc => wc.BetRecord.Amount),
-                    TotalLosses = g.Where(wc => wc.BetRecord.Outcome == BetRecord.BetOutcome.Lost)
-                                  .Sum(wc => wc.BetRecord.Amount),
-                    BetCount = g.Count(),
-                    HighConfidenceCount = g.Count(wc => wc.Confidence >= 0.9),
-                    FirstBetRecord = g.First().BetRecord // For PendingTag.BetRecordId
-                })
-                .ToListAsync();
-
-            int pendingTagsCreated = 0;
-
-            foreach (var writer in writerData)
+            try
             {
-                // Check if this writer already has a pending tag
-                var existingPendingTag = await _context.PendingTags
-                    .AnyAsync(pt => pt.WriterId == writer.WriterId && !pt.IsCompleted);
+                // Get customer
+                var customer = await _context.Customers
+                    .Include(c => c.BetRecords)
+                    .FirstOrDefaultAsync(c => c.Id == customerId);
 
-                if (existingPendingTag)
+                if (customer == null)
                 {
-                    _logger.LogDebug($"Writer {writer.WriterId} already has pending tag, skipping");
-                    continue;
+                    _logger.LogWarning("Customer {CustomerId} not found", customerId);
+                    return generatedAlerts;
                 }
 
-                // Evaluate each threshold rule
-                foreach (var rule in thresholdRules)
+                // Get all active rules
+                var activeRules = await _context.ThresholdRules
+                    .Where(r => r.IsActive)
+                    .ToListAsync();
+
+                if (!activeRules.Any())
                 {
-                    bool thresholdExceeded = rule.Name switch
+                    _logger.LogInformation("No active threshold rules found for customer {CustomerId}", customerId);
+                    return generatedAlerts;
+                }
+
+                // Get existing alerts to avoid duplicates
+                var existingAlerts = await _context.Alerts
+                    .Where(a => a.CustomerId == customerId && !a.IsResolved)
+                    .ToListAsync();
+
+                // Process each rule
+                foreach (var rule in activeRules)
+                {
+                    // Skip if we already have an active alert for this rule type
+                    if (existingAlerts.Any(a => a.AlertType == $"Threshold_{rule.RuleType}"))
+                        continue;
+
+                    var alert = await EvaluateRuleForCustomerAsync(rule, customer);
+                    if (alert != null)
                     {
-                        "DailyStake" or "MaxDailySpend" => writer.TotalStake >= rule.Value,
-                        "DailyLoss" or "MaxDailyLoss" => writer.TotalLosses >= rule.Value,
-                        "DailyBetCount" or "MaxBetsPerDay" => writer.BetCount >= rule.Value,
-                        _ => false
-                    };
-
-                    if (thresholdExceeded)
-                    {
-                        // Create PendingTag for this writer
-                        var pendingTag = new PendingTag
-                        {
-                            BetRecordId = writer.FirstBetRecord.Id,
-                            WriterId = writer.WriterId,
-                            Tag = $"Writer {writer.WriterId} - {rule.Name} Exceeded",
-                            ThresholdType = rule.Name,
-                            ThresholdValue = rule.Value,
-                            ActualValue = rule.Name switch
-                            {
-                                "DailyStake" or "MaxDailySpend" => writer.TotalStake,
-                                "DailyLoss" or "MaxDailyLoss" => writer.TotalLosses,
-                                "DailyBetCount" or "MaxBetsPerDay" => writer.BetCount,
-                                _ => 0
-                            },
-                            CreatedAt = DateTime.UtcNow,
-                            IsCompleted = false,
-                            RequiresAttention = true
-                        };
-
-                        _context.PendingTags.Add(pendingTag);
-                        pendingTagsCreated++;
-
-                        _logger.LogWarning(
-                            $"🚨 THRESHOLD EXCEEDED - Writer {writer.WriterId}: " +
-                            $"{rule.Name} = {pendingTag.ActualValue:C} (threshold: {rule.Value:C})");
-
-                        break; // One pending tag per writer per evaluation
+                        generatedAlerts.Add(alert);
+                        _context.Alerts.Add(alert);
+                        await _context.SaveChangesAsync();
                     }
                 }
-            }
 
-            if (pendingTagsCreated > 0)
+                return generatedAlerts;
+            }
+            catch (Exception ex)
             {
-                await _context.SaveChangesAsync();
-                _logger.LogInformation($"Created {pendingTagsCreated} pending tags for writer thresholds");
+                _logger.LogError(ex, "Error evaluating thresholds for customer {CustomerId}", customerId);
+                return generatedAlerts;
             }
-
-            return pendingTagsCreated;
         }
 
         /// <summary>
-        /// Evaluate thresholds for tagged customers → Create Alerts
+        /// Processes a new bet for threshold violations
         /// </summary>
-        public async Task<int> EvaluateCustomerThresholdsAsync()
+        /// <param name="bet">The bet record to evaluate</param>
+        /// <returns>True if processed successfully</returns>
+        public async Task<bool> ProcessBetForThresholdsAsync(BetRecord bet)
         {
-            _logger.LogInformation("Evaluating customer thresholds for tagged writers...");
-
-            var today = DateTime.Today;
-            var tomorrow = today.AddDays(1);
-
-            // Get threshold rules
-            var thresholdRules = await _context.ThresholdRules.ToListAsync();
-
-            // Get tagged customers with today's bet activity
-            var customerData = await _context.WriterClassifications
-                .Where(wc => wc.CustomerId != null && // Tagged
-                           wc.Confidence >= 0.75 && // Confidence ≥ 0.75
-                           wc.BetRecord.PlacedAt >= today &&
-                           wc.BetRecord.PlacedAt < tomorrow)
-                .Include(wc => wc.BetRecord)
-                .Include(wc => wc.Customer)
-                .GroupBy(wc => wc.CustomerId)
-                .Select(g => new
-                {
-                    CustomerId = g.Key,
-                    Customer = g.First().Customer,
-                    TotalStake = g.Sum(wc => wc.BetRecord.Amount),
-                    TotalLosses = g.Where(wc => wc.BetRecord.Outcome == BetRecord.BetOutcome.Lost)
-                                  .Sum(wc => wc.BetRecord.Amount),
-                    BetCount = g.Count()
-                })
-                .ToListAsync();
-
-            int alertsCreated = 0;
-
-            foreach (var customer in customerData)
+            if (bet.CustomerId == null)
             {
-                if (customer.CustomerId == null) continue;
+                _logger.LogInformation("Bet {BetId} has no associated customer, skipping threshold evaluation", bet.Id);
+                return true;
+            }
 
-                foreach (var rule in thresholdRules)
-                {
-                    bool thresholdExceeded = rule.Name switch
+            try
+            {
+                _logger.LogInformation("Processing bet {BetId} for customer {CustomerId} for thresholds", bet.Id, bet.CustomerId);
+                await EvaluateThresholdsForCustomerAsync(bet.CustomerId.Value);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing bet {BetId} for thresholds", bet.Id);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Evaluates a specific rule for a customer
+        /// </summary>
+        private Task<Alert?> EvaluateRuleForCustomerAsync(ThresholdRule rule, Customer customer)
+        {
+            var timeWindow = DateTime.UtcNow.AddMinutes(-rule.TimeWindowMinutes);
+            var customerBets = customer.BetRecords.Where(b => b.PlacedAt >= timeWindow).ToList();
+
+            if (!customerBets.Any())
+                return Task.FromResult<Alert?>(null);
+
+            switch (rule.RuleType)
+            {
+                case "DailyStake":
                     {
-                        "DailyStake" or "MaxDailySpend" => customer.TotalStake >= rule.Value,
-                        "DailyLoss" or "MaxDailyLoss" => customer.TotalLosses >= rule.Value,
-                        "DailyBetCount" or "MaxBetsPerDay" => customer.BetCount >= rule.Value,
-                        _ => false
-                    };
-
-                    if (thresholdExceeded)
-                    {
-                        // Check if alert already exists for today
-                        var existingAlert = await _context.Alerts
-                            .AnyAsync(a => a.CustomerId == customer.CustomerId &&
-                                         a.RuleId == rule.Id &&
-                                         a.TriggeredAt >= today &&
-                                         a.TriggeredAt < tomorrow);
-
-                        if (!existingAlert)
+                        var totalStake = customerBets.Sum(b => b.Amount);
+                        if (totalStake > rule.Value)
                         {
-                            var alert = new Alert
-                            {
-                                CustomerId = customer.CustomerId.Value,
-                                RuleId = rule.Id,
-                                Message = $"Customer '{customer.Customer?.TagName}' exceeded {rule.Name} threshold: {rule.Value:C}",
-                                TriggeredAt = DateTime.UtcNow
-                            };
-
-                            _context.Alerts.Add(alert);
-                            alertsCreated++;
-
-                            _logger.LogWarning(
-                                $"🚨 CUSTOMER ALERT - {customer.Customer?.TagName}: " +
-                                $"{rule.Name} exceeded (Value: {rule.Value:C})");
+                            return Task.FromResult<Alert?>(CreateThresholdAlert(rule, customer, totalStake));
                         }
+                        break;
                     }
-                }
+                case "DailyBetCount":
+                    {
+                        var betCount = customerBets.Count;
+                        if (betCount > rule.Value)
+                        {
+                            return Task.FromResult<Alert?>(CreateThresholdAlert(rule, customer, betCount));
+                        }
+                        break;
+                    }
+                case "DailyLoss":
+                    {
+                        var totalLoss = customerBets.Where(b => b.Outcome == BetRecord.BetOutcome.Loss)
+                            .Sum(b => b.Amount);
+                        if (totalLoss > rule.Value)
+                        {
+                            return Task.FromResult<Alert?>(CreateThresholdAlert(rule, customer, totalLoss));
+                        }
+                        break;
+                    }
+                default:
+                    _logger.LogWarning("Unknown rule type: {RuleType}", rule.RuleType);
+                    break;
             }
 
-            if (alertsCreated > 0)
+            return Task.FromResult<Alert?>(null);
+        }
+
+        /// <summary>
+        /// Creates an alert for a threshold violation
+        /// </summary>
+        private Alert CreateThresholdAlert(ThresholdRule rule, Customer customer, decimal currentValue)
+        {
+            string message = $"Customer '{customer.Name}' exceeded {rule.Name} threshold. " +
+                             $"Current value: {currentValue:C}, Threshold: {rule.Value:C}";
+
+            return new Alert
             {
-                await _context.SaveChangesAsync();
-                _logger.LogInformation($"Created {alertsCreated} alerts for customer thresholds");
-            }
+                AlertType = $"Threshold_{rule.RuleType}",
+                Message = message,
+                Severity = "Medium", // Default severity
+                CustomerId = customer.Id,
+                CreatedAt = DateTime.UtcNow,
+                IsResolved = false
+            };
+        }
 
-            return alertsCreated;
+        /// <summary>
+        /// Creates an alert for a threshold violation with integer value
+        /// </summary>
+        private Alert CreateThresholdAlert(ThresholdRule rule, Customer customer, int currentValue)
+        {
+            string message = $"Customer '{customer.Name}' exceeded {rule.Name} threshold. " +
+                             $"Current value: {currentValue}, Threshold: {(int)rule.Value}";
+
+            return new Alert
+            {
+                AlertType = $"Threshold_{rule.RuleType}",
+                Message = message,
+                Severity = "Medium", // Default severity
+                CustomerId = customer.Id,
+                CreatedAt = DateTime.UtcNow,
+                IsResolved = false
+            };
         }
     }
 }

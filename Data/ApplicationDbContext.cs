@@ -5,39 +5,38 @@ namespace bet_fred.Data
 {
     public class ApplicationDbContext : DbContext
     {
-        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
-            : base(options) { }
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
+        {
+        }
 
-        public DbSet<Customer> Customers { get; set; } = null!;
-        public DbSet<BetRecord> BetRecords { get; set; } = null!;
-        public DbSet<Alert> Alerts { get; set; } = null!;
-        public DbSet<PendingTag> PendingTags { get; set; } = null!;
-        public DbSet<ThresholdRule> ThresholdRules { get; set; } = null!;
-        public DbSet<WriterClassification> WriterClassifications { get; set; } = null!;
+        public DbSet<Customer> Customers { get; set; }
+        public DbSet<BetRecord> BetRecords { get; set; }
+        public DbSet<Alert> Alerts { get; set; }
+        public DbSet<ThresholdRule> ThresholdRules { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            // Configure WriterClassification relationships
-            modelBuilder.Entity<WriterClassification>()
-                .HasOne(wc => wc.BetRecord)
-                .WithMany()
-                .HasForeignKey(wc => wc.BetRecordId)
-                .OnDelete(DeleteBehavior.Cascade);
+            // Configure relationships
+            modelBuilder.Entity<BetRecord>()
+                .HasOne(b => b.Customer)
+                .WithMany(c => c.BetRecords)
+                .HasForeignKey(b => b.CustomerId);
 
-            modelBuilder.Entity<WriterClassification>()
-                .HasOne(wc => wc.Customer)
-                .WithMany(c => c.WriterClassifications)
-                .HasForeignKey(wc => wc.CustomerId)
-                .OnDelete(DeleteBehavior.SetNull); // Keep classification if customer deleted
+            modelBuilder.Entity<Alert>()
+                .HasOne(a => a.Customer)
+                .WithMany(c => c.Alerts)
+                .HasForeignKey(a => a.CustomerId);
 
-            // Index for performance
-            modelBuilder.Entity<WriterClassification>()
-                .HasIndex(wc => wc.WriterId);
+            // Configure decimal precision
+            modelBuilder.Entity<BetRecord>()
+                .Property(b => b.Amount)
+                .HasColumnType("decimal(18,2)");
 
-            modelBuilder.Entity<WriterClassification>()
-                .HasIndex(wc => wc.Confidence);
+            modelBuilder.Entity<Customer>()
+                .Property(c => c.BetLimit)
+                .HasColumnType("decimal(18,2)");
         }
     }
 }

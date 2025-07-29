@@ -27,7 +27,6 @@ The service uses a model hierarchy:
 
 1. **EfficientNet-B0**: Primary model - optimized architecture balancing accuracy and computational efficiency
 2. **DenseNet121**: Fallback model - dense connections for improved gradient flow
-3. **ResNet18**: Legacy support - maintained for backwards compatibility
 
 ## Installation
 
@@ -96,7 +95,17 @@ This service includes several additional tools:
 
 ## Configuration
 
-Configuration is defined in `src/utils/config.py`:
+Configuration is unified in a single file: `src/utils/config.py`.
+
+This includes:
+- Model configuration
+- Demo settings
+- Path configurations
+- Performance thresholds 
+
+The system supports two modes:
+- **Production Mode**: Uses all 13 writers with full dataset
+- **Demo Mode**: Uses a subset of 5 writers for demonstration purposes
 
 - Model parameters
 - Image sizes

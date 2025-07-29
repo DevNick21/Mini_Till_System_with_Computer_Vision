@@ -1,14 +1,7 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
-using System.Net.Http;
-using System.Linq;
-using bet_fred.Data;
-using bet_fred.Models;
+using bet_fred.Services;
 
 namespace bet_fred.Services
 {
@@ -16,152 +9,54 @@ namespace bet_fred.Services
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<ThresholdHostedService> _logger;
-        private readonly IHttpClientFactory _httpClientFactory;
-        private readonly TimeSpan _interval = TimeSpan.FromMinutes(2); // Run every 2 minutes
+        private readonly TimeSpan _interval = TimeSpan.FromMinutes(15); // Run every 15 minutes
 
         public ThresholdHostedService(
             IServiceProvider serviceProvider,
-            ILogger<ThresholdHostedService> logger,
-            IHttpClientFactory httpClientFactory)
+            ILogger<ThresholdHostedService> logger)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
-            _httpClientFactory = httpClientFactory;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("🚀 Background Classification and Threshold Service started");
+            _logger.LogInformation("Threshold monitoring service is starting");
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    using var scope = _serviceProvider.CreateScope();
-                    var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                    var thresholdEvaluator = scope.ServiceProvider.GetRequiredService<ThresholdEvaluator>();
-
-                    // Step 1: Run classification on unclassified BetRecords
-                    var classificationsCreated = await RunClassificationAsync(context);
-
-                    // Step 2: Evaluate thresholds for untagged writers → Create PendingTags
-                    // Step 3: Evaluate thresholds for tagged customers → Create Alerts
-                    var (pendingTags, alerts) = await thresholdEvaluator.EvaluateAllThresholdsAsync();
-
-                    if (classificationsCreated > 0 || pendingTags > 0 || alerts > 0)
-                    {
-                        _logger.LogInformation(
-                            $"✅ Background processing complete: " +
-                            $"{classificationsCreated} classifications, " +
-                            $"{pendingTags} pending tags, " +
-                            $"{alerts} alerts");
-                    }
+                    _logger.LogInformation("Running scheduled threshold evaluation");
+                    await EvaluateThresholdsAsync();
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "❌ Error in background processing");
+                    _logger.LogError(ex, "Error occurred during threshold evaluation");
                 }
 
-                // Wait for next interval
+                _logger.LogInformation("Threshold evaluation complete, waiting {Interval} minutes until next run", _interval.TotalMinutes);
                 await Task.Delay(_interval, stoppingToken);
             }
+
+            _logger.LogInformation("Threshold monitoring service is stopping");
         }
 
-        /// <summary>
-        /// Step 1: Run classification on unclassified BetRecords
-        /// </summary>
-        private async Task<int> RunClassificationAsync(ApplicationDbContext context)
+        private async Task EvaluateThresholdsAsync()
         {
-            // Get BetRecords that haven't been classified yet
-            var unclassified = await context.BetRecords
-                .Where(br => br.ImageData != null &&
-                           !context.WriterClassifications.Any(wc => wc.BetRecordId == br.Id))
-                .Take(50) // Process in batches to avoid overwhelming the Python API
-                .ToListAsync();
-
-            if (!unclassified.Any())
-            {
-                _logger.LogDebug("No unclassified bet records found");
-                return 0;
-            }
-
-            _logger.LogInformation($"🔍 Running classification on {unclassified.Count} unclassified bet records");
-
+            // Create a scope to resolve scoped services
+            using var scope = _serviceProvider.CreateScope();
             try
             {
-                // Call Python classification API
-                using var httpClient = _httpClientFactory.CreateClient();
-                using var content = new MultipartFormDataContent();
+                var evaluator = scope.ServiceProvider.GetRequiredService<IThresholdEvaluator>();
+                var alerts = await evaluator.EvaluateThresholdsAsync();
 
-                foreach (var betRecord in unclassified)
-                {
-                    var imageContent = new ByteArrayContent(betRecord.ImageData);
-                    imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
-                    content.Add(imageContent, "files", $"{betRecord.Id}.jpg");
-                }
-
-                // Make API call to Python service
-                var response = await httpClient.PostAsync("http://localhost:8001/classify-anonymous", content);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogError($"Classification API failed with status {response.StatusCode}");
-                    return 0;
-                }
-
-                var result = await response.Content.ReadFromJsonAsync<ClassificationApiResponse>();
-
-                if (result?.Results == null || !result.Results.Any())
-                {
-                    _logger.LogWarning("Classification API returned no results");
-                    return 0;
-                }
-
-                // Save classification results
-                int classificationsCreated = 0;
-                foreach (var classificationResult in result.Results)
-                {
-                    var writerClassification = new WriterClassification
-                    {
-                        BetRecordId = classificationResult.SlipId,
-                        WriterId = classificationResult.WriterId,
-                        Confidence = classificationResult.Confidence,
-                        ConfidenceLevel = classificationResult.ConfidenceLevel,
-                        CreatedAt = DateTime.UtcNow
-                    };
-
-                    context.WriterClassifications.Add(writerClassification);
-                    classificationsCreated++;
-                }
-
-                await context.SaveChangesAsync();
-
-                _logger.LogInformation($"✅ Created {classificationsCreated} writer classifications");
-                return classificationsCreated;
+                _logger.LogInformation("Generated {AlertCount} alerts during scheduled evaluation", alerts.Count());
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Error during classification API call");
-                return 0;
+                _logger.LogError(ex, "Error resolving services for threshold evaluation");
             }
         }
-    }
-
-    /// <summary>
-    /// Response models for Python classification API
-    /// </summary>
-    public class ClassificationApiResponse
-    {
-        public List<ClassificationResult> Results { get; set; } = new();
-        public Dictionary<string, object> Summary { get; set; } = new();
-        public string Timestamp { get; set; } = string.Empty;
-    }
-
-    public class ClassificationResult
-    {
-        public int SlipId { get; set; }
-        public int WriterId { get; set; }
-        public double Confidence { get; set; }
-        public string ConfidenceLevel { get; set; } = string.Empty;
     }
 }
