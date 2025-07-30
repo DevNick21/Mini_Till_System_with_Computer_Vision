@@ -5,7 +5,7 @@
 This project demonstrates a proof-of-concept system for Betfred to:
 - Ingest customer bet records and scanned slip images via a two-step API.
 - Store metadata and raw image data in a SQLite database using EF Core.
-- Cluster handwriting styles across slips with a Python microservice (unsupervised).
+- Classify handwriting styles across slips with a Python microservice.
 - Associate clustered slips back to customers and simulate threshold-based alerts.
 
 
@@ -16,7 +16,7 @@ This project demonstrates a proof-of-concept system for Betfred to:
 - **Two-step ingestion:**
   1. Create bet metadata record (`POST /bets`)
   2. Upload slip image (`POST /bets/{id}/slip`)
-- **Handwriting clustering** via an external Python microservice (FastAPI + scikit-learn)
+- **Handwriting classifier** via an external Python microservice (FastAPI + scikit-learn)
 - **Threshold rules** for automated alert generation
 - **Swagger/OpenAPI** documentation and UI in development mode
 
@@ -54,11 +54,11 @@ dotnet run
 ```
 - Swagger UI available at https://localhost:5001/swagger
 
-### 5. Prepare and run the Python clustering service
+### 5. Prepare and run the Python classification service
 ```bash
 cd cv_service
 pip install fastapi uvicorn opencv-python scikit-learn
-uvicorn main:app --reload
+uvicorn main: app --reload
 ```
 - Exposes `POST /cluster` for handwriting clustering
 ## Usage
