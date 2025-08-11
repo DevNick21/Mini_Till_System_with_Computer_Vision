@@ -5,11 +5,15 @@ const API_URL = process.env.REACT_APP_API_URL || '/api';
 
 export const apiService = {
   // Bet Records
-  async uploadBetImage(file: File): Promise<string> {
+  async uploadBetImage(file: File, amount?: number, customerId?: number): Promise<string> {
     const formData = new FormData();
     formData.append('file', file);
+    if (typeof amount === 'number') formData.append('amount', String(amount));
+    if (typeof customerId === 'number') formData.append('customerId', String(customerId));
     const response = await axios.post(`${API_URL}/bet/upload`, formData);
-    return response.data;
+    // Backend may return the whole object or just the id string; normalize to id string
+    const data = response.data as any;
+    return typeof data === 'string' ? data : String(data?.id ?? '');
   },
 
   async createBet(betData: Partial<BetRecord>): Promise<BetRecord> {

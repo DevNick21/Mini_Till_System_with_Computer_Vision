@@ -15,9 +15,7 @@ namespace bet_fred.Models
 
         public DateTime PlacedAt { get; set; } = DateTime.UtcNow;
 
-        [Required]
-        [StringLength(50)]
-        public string BetType { get; set; } = string.Empty;
+        // BetType removed for this demo
 
         public BetOutcome Outcome { get; set; } = BetOutcome.Unknown;
 

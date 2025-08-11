@@ -15,9 +15,7 @@ namespace bet_fred.DTOs
 
         public DateTime PlacedAt { get; set; }
 
-        [Required]
-        [StringLength(50)]
-        public string BetType { get; set; } = string.Empty;
+        // BetType removed for demo simplification
 
         public string Outcome { get; set; } = "Unknown";
 
@@ -45,10 +43,6 @@ namespace bet_fred.DTOs
         [Range(0.01, 100000)]
         public decimal Amount { get; set; }
 
-        [Required]
-        [StringLength(50)]
-        public string BetType { get; set; } = string.Empty;
-
         public int? CustomerId { get; set; }
 
         // Base64 encoded image data for handwriting analysis
@@ -61,9 +55,6 @@ namespace bet_fred.DTOs
     public class UpdateBetRecordDto
     {
         public decimal? Amount { get; set; }
-
-        [StringLength(50)]
-        public string? BetType { get; set; }
 
         public string? Outcome { get; set; }
 
@@ -84,9 +75,6 @@ namespace bet_fred.DTOs
         public string ImageDataBase64 { get; set; } = string.Empty;
 
         public decimal Amount { get; set; }
-
-        [StringLength(50)]
-        public string BetType { get; set; } = string.Empty;
 
         public int? CustomerId { get; set; }
     }

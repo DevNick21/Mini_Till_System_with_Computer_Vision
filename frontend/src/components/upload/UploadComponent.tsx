@@ -86,14 +86,11 @@ const UploadComponent: React.FC = () => {
       setUploading(true);
       setError(null);
 
-      // Upload image first - this now creates a bet with default values and returns the ID
-      const betId = await apiService.uploadBetImage(file);
+  // Upload image along with stake (amount); backend will create the bet and return ID
+  const betId = await apiService.uploadBetImage(file, betData.amount);
       
       // Now update the bet with the form data
-      await apiService.updateBet(parseInt(betId), {
-        ...betData,
-        id: parseInt(betId)
-      });
+  await apiService.updateBet(parseInt(betId), { id: parseInt(betId) });
 
       setUploading(false);
       setUploadSuccess(true);

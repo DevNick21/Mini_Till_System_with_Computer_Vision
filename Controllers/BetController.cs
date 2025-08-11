@@ -72,7 +72,6 @@ namespace bet_fred.Controllers
                 var betRecord = new BetRecord
                 {
                     Amount = createDto.Amount,
-                    BetType = createDto.BetType,
                     CustomerId = createDto.CustomerId,
                     PlacedAt = DateTime.UtcNow
                 };
@@ -94,7 +93,7 @@ namespace bet_fred.Controllers
         }
 
         [HttpPost("upload")]
-        public async Task<ActionResult<BetRecordDto>> UploadBetImage(IFormFile file, [FromQuery] int? customerId = null)
+        public async Task<ActionResult<BetRecordDto>> UploadBetImage(IFormFile file, [FromForm] int? customerId = null, [FromForm] decimal? amount = null)
         {
             if (file == null || file.Length == 0)
                 return BadRequest("No file provided");
@@ -104,8 +103,7 @@ namespace bet_fred.Controllers
                 // First create a new bet record
                 var newBet = new BetRecord
                 {
-                    BetType = "Pending",
-                    Amount = 0, // Default values to be updated later
+                    Amount = amount ?? 0, // Amount provided at upload time (stake)
                     PlacedAt = DateTime.UtcNow,
                     CustomerId = customerId
                 };
@@ -166,8 +164,7 @@ namespace bet_fred.Controllers
                 if (updateDto.Amount.HasValue)
                     existingBet.Amount = updateDto.Amount.Value;
 
-                if (updateDto.BetType != null)
-                    existingBet.BetType = updateDto.BetType;
+                // BetType removed
 
                 if (updateDto.Outcome != null)
                 {
@@ -335,7 +332,6 @@ namespace bet_fred.Controllers
                 Id = betRecord.Id,
                 Amount = betRecord.Amount,
                 PlacedAt = betRecord.PlacedAt,
-                BetType = betRecord.BetType,
                 Outcome = betRecord.Outcome.ToString(),
                 WriterClassification = betRecord.WriterClassification,
                 ClassificationConfidence = betRecord.ClassificationConfidence,

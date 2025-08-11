@@ -61,7 +61,6 @@ namespace bet_fred.Services
                 {
                     Amount = random.Next(50, 1000),
                     PlacedAt = DateTime.Today.AddHours(random.Next(8, 20)),
-                    BetType = "Single",
                     Outcome = BetRecord.BetOutcome.Unknown,
                     ImageData = imageData
                 };
@@ -256,7 +255,6 @@ namespace bet_fred.Services
 
                 // Update properties
                 existingBet.Amount = betRecord.Amount;
-                existingBet.BetType = betRecord.BetType;
                 existingBet.CustomerId = betRecord.CustomerId;
                 existingBet.Outcome = betRecord.Outcome;
 
