@@ -7,9 +7,9 @@ const AlertsComponent: React.FC = () => {
   const [alerts, setAlerts] = useState<AlertType[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any>({
-    totalAlerts: 0,
-    pendingAlerts: 0,
-    highRiskCustomers: 0
+    totalCustomers: 0,
+    totalBets: 0,
+    totalAlerts: 0
   });
 
   useEffect(() => {
@@ -38,18 +38,12 @@ const AlertsComponent: React.FC = () => {
     }
   };
 
-  const handleResolveAlert = async (alertId: number) => {
-    try {
-      await apiService.resolveAlert(alertId);
-      setAlerts(alerts.map(alert => 
-        alert.id === alertId 
-          ? { ...alert, isResolved: true } 
-          : alert
-      ));
-      loadDashboardStats();
-    } catch (error) {
-      console.error('Error resolving alert:', error);
-    }
+  const handleResolveAlert = (alertId: number) => {
+    // Optimistically update UI; backend resolve endpoint not implemented
+    setAlerts(prev => prev.map(alert =>
+      alert.id === alertId ? { ...alert, isResolved: true } : alert
+    ));
+    loadDashboardStats();
   };
 
   return (
@@ -60,24 +54,24 @@ const AlertsComponent: React.FC = () => {
         <Col md={4}>
           <Card className="text-center bg-primary text-white">
             <Card.Body>
-              <h2>{stats.totalAlerts}</h2>
-              <p>Total Alerts</p>
+              <h2>{stats.totalCustomers}</h2>
+              <p>Total Customers</p>
+            </Card.Body>
+          </Card>
+        </Col>
+        <Col md={4}>
+          <Card className="text-center bg-success text-white">
+            <Card.Body>
+              <h2>{stats.totalBets}</h2>
+              <p>Total Bets</p>
             </Card.Body>
           </Card>
         </Col>
         <Col md={4}>
           <Card className="text-center bg-warning text-dark">
             <Card.Body>
-              <h2>{stats.pendingAlerts}</h2>
-              <p>Pending Alerts</p>
-            </Card.Body>
-          </Card>
-        </Col>
-        <Col md={4}>
-          <Card className="text-center bg-danger text-white">
-            <Card.Body>
-              <h2>{stats.highRiskCustomers}</h2>
-              <p>High Risk Customers</p>
+              <h2>{stats.totalAlerts}</h2>
+              <p>Total Alerts</p>
             </Card.Body>
           </Card>
         </Col>
@@ -97,9 +91,10 @@ const AlertsComponent: React.FC = () => {
               <Alert 
                 key={alert.id} 
                 variant={
-                  alert.type === 'High Risk' ? 'danger' :
-                  alert.type === 'Medium Risk' ? 'warning' :
-                  alert.type === 'Pattern Detected' ? 'primary' : 'info'
+                  alert.severity?.toLowerCase() === 'critical' ? 'danger' :
+                  alert.severity?.toLowerCase() === 'high' ? 'danger' :
+                  alert.severity?.toLowerCase() === 'medium' ? 'warning' :
+                  alert.severity?.toLowerCase() === 'low' ? 'info' : 'secondary'
                 }
                 className="mb-3"
               >
@@ -115,10 +110,10 @@ const AlertsComponent: React.FC = () => {
                       </Badge>
                     </h5>
                     <div>
-                      <strong>Customer:</strong> {alert.customer?.name}
+                      <strong>CustomerId:</strong> {alert.customerId ?? 'N/A'}
                     </div>
                     <div>
-                      <strong>Date:</strong> {new Date(alert.date).toLocaleString()}
+                      <strong>Date:</strong> {new Date(alert.createdAt).toLocaleString()}
                     </div>
                   </div>
                   

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Badge, Form, InputGroup, Card } from 'react-bootstrap';
+import { Table, Badge, Form, InputGroup, Card } from 'react-bootstrap';
 import { apiService } from '../../services/api';
 import { Customer } from '../../types';
 
@@ -24,18 +24,7 @@ const CustomersComponent: React.FC = () => {
     }
   };
 
-  const handleTagCustomer = async (customerId: number, isTagged: boolean) => {
-    try {
-      await apiService.tagCustomer(customerId, isTagged);
-      setCustomers(customers.map(customer => 
-        customer.id === customerId 
-          ? { ...customer, isTagged } 
-          : customer
-      ));
-    } catch (error) {
-      console.error('Error updating customer tag:', error);
-    }
-  };
+  // Tagging functionality removed pending backend support
 
   const filteredCustomers = customers.filter(customer => 
     customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -68,8 +57,7 @@ const CustomersComponent: React.FC = () => {
                 <th>Email</th>
                 <th>Phone</th>
                 <th>Risk Level</th>
-                <th>Status</th>
-                <th>Actions</th>
+                {/* Tagging/status removed (no backend support) */}
               </tr>
             </thead>
             <tbody>
@@ -95,20 +83,6 @@ const CustomersComponent: React.FC = () => {
                       }>
                         {customer.riskLevel}
                       </Badge>
-                    </td>
-                    <td>
-                      <Badge bg={customer.isTagged ? 'info' : 'secondary'}>
-                        {customer.isTagged ? 'Tagged' : 'Normal'}
-                      </Badge>
-                    </td>
-                    <td>
-                      <Button 
-                        variant={customer.isTagged ? "outline-secondary" : "outline-info"}
-                        size="sm"
-                        onClick={() => handleTagCustomer(customer.id, !customer.isTagged)}
-                      >
-                        {customer.isTagged ? 'Untag' : 'Tag'}
-                      </Button>
                     </td>
                   </tr>
                 ))

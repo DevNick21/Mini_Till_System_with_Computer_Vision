@@ -1,13 +1,12 @@
 export interface BetRecord {
   id: number;
-  customerId: number;
-  customer: Customer;
   amount: number;
-  odds: string;
-  date: string;
-  handwritingImageUrl: string;
-  handwritingClassification: string;
-  status: string;
+  placedAt: string;
+  outcome: string;
+  writerClassification?: string | null;
+  classificationConfidence?: number | null;
+  customerId?: number | null;
+  customerName?: string | null;
 }
 
 export interface Customer {
@@ -15,17 +14,16 @@ export interface Customer {
   name: string;
   email: string;
   phone: string;
-  isTagged: boolean;
   riskLevel: string;
 }
 
 export interface Alert {
   id: number;
-  customerId: number;
-  customer: Customer;
+  customerId?: number | null;
   message: string;
-  type: string;
-  date: string;
+  alertType: string;
+  severity: string;
+  createdAt: string;
   isResolved: boolean;
 }
 

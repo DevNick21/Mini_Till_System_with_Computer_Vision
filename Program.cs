@@ -26,6 +26,9 @@ namespace bet_fred
             // Register services
             builder.Services.AddScoped<IDataService, DataService>();
             builder.Services.AddScoped<IThresholdEvaluator, ThresholdEvaluator>();
+            builder.Services.AddSingleton<IClassificationBackgroundQueue, ClassificationBackgroundQueue>();
+            builder.Services.AddSingleton<IClassificationUpdateNotifier, ClassificationUpdateNotifier>();
+            builder.Services.AddHostedService<ClassificationProcessingService>();
 
             // Register HttpClient for CV service
             builder.Services.AddHttpClient<IClassificationService, ClassificationService>();
@@ -45,11 +48,20 @@ namespace bet_fred
             // Add CORS to allow the React app to make API requests
             builder.Services.AddCors(options =>
             {
-                options.AddPolicy("ReactAppPolicy", builder =>
+                options.AddPolicy("ReactAppPolicy", policy =>
                 {
-                    builder.WithOrigins("http://localhost:3000")
-                           .AllowAnyMethod()
-                           .AllowAnyHeader();
+                    policy.SetIsOriginAllowed(origin =>
+                    {
+                        if (string.IsNullOrEmpty(origin)) return false;
+                        var uri = new Uri(origin);
+                        var isLocalhost = uri.Host == "localhost";
+                        var validPorts = new[] { 3000, 5113 };
+                        var validPort = validPorts.Contains(uri.Port);
+                        return isLocalhost && validPort;
+                    })
+                    .AllowAnyMethod()
+                    .AllowAnyHeader()
+                    .AllowCredentials();
                 });
             });
 
@@ -69,28 +81,36 @@ namespace bet_fred
 
             app.UseHttpsRedirection();
             app.UseStaticFiles();
-            app.UseCors("ReactAppPolicy");
             app.UseRouting();
+            // Apply CORS after routing and before endpoints per ASP.NET Core guidance
+            app.Use(async (context, next) =>
+            {
+                var origin = context.Request.Headers["Origin"].FirstOrDefault();
+                if (!string.IsNullOrEmpty(origin))
+                {
+                    Console.WriteLine($"Incoming Origin: {origin}");
+                }
+                await next();
+            });
+            app.UseCors("ReactAppPolicy");
 
-            app.MapControllers();
-
-            // Ensure database is created
+            // Apply pending migrations
             using (var scope = app.Services.CreateScope())
             {
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-                context.Database.EnsureCreated();
+                context.Database.Migrate();
             }
 
-            // Configure SPA serving
-            app.UseSpa(spa =>
-            {
-                spa.Options.SourcePath = "frontend";
+            // Map API controllers
+            app.MapControllers();
 
-                if (app.Environment.IsDevelopment())
-                {
-                    spa.UseProxyToSpaDevelopmentServer("http://localhost:3000");
-                }
-            });
+            // For development, just serve static files if they exist, otherwise return 404
+            // The React dev server should run separately on port 3000
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseSpaStaticFiles();
+                app.MapFallbackToFile("index.html");
+            }
 
             app.Run();
         }

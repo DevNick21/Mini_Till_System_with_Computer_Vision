@@ -15,17 +15,23 @@ namespace bet_fred.Controllers
         private readonly IClassificationService _classificationService;
         private readonly IThresholdEvaluator _thresholdEvaluator;
         private readonly ILogger<BetController> _logger;
+        private readonly IClassificationBackgroundQueue _classificationQueue;
+        private readonly IClassificationUpdateNotifier _updateNotifier;
 
         public BetController(
             IDataService dataService,
             IClassificationService classificationService,
             IThresholdEvaluator thresholdEvaluator,
-            ILogger<BetController> logger)
+            ILogger<BetController> logger,
+        IClassificationBackgroundQueue classificationQueue,
+        IClassificationUpdateNotifier updateNotifier)
         {
             _dataService = dataService;
             _classificationService = classificationService;
             _thresholdEvaluator = thresholdEvaluator;
             _logger = logger;
+            _classificationQueue = classificationQueue;
+            _updateNotifier = updateNotifier;
         }
 
         [HttpGet]
@@ -109,36 +115,15 @@ namespace bet_fred.Controllers
                 };
 
                 var createdBet = await _dataService.CreateBetRecordAsync(newBet);
-
-                // Then upload the image for this bet
                 using var memoryStream = new MemoryStream();
                 await file.CopyToAsync(memoryStream);
                 var imageData = memoryStream.ToArray();
-
                 var success = await _dataService.UploadSlipAsync(createdBet.Id, imageData);
-
                 if (!success)
                     return BadRequest("Failed to upload slip");
 
-                // Process with CV service if available
-                if (await _classificationService.IsServiceHealthyAsync())
-                {
-                    var (writerId, confidence) = await _classificationService.ClassifyHandwritingAsync(imageData, createdBet.Id);
-                    if (writerId != null && confidence.HasValue)
-                    {
-                        await _dataService.UpdateBetClassificationAsync(createdBet.Id, writerId, confidence.Value);
-
-                        // Get the updated bet for the response
-                        var bets = await _dataService.GetBetRecordsAsync();
-                        var updatedBet = bets.FirstOrDefault(b => b.Id == createdBet.Id);
-                        if (updatedBet != null)
-                        {
-                            return Ok(MapToBetRecordDto(updatedBet));
-                        }
-                    }
-                }
-
-                // Return the bet
+                _classificationQueue.Enqueue(createdBet.Id, imageData);
+                _logger.LogInformation("Enqueued bet {BetId} for background classification", createdBet.Id);
                 return Ok(MapToBetRecordDto(createdBet));
             }
             catch (Exception ex)
@@ -338,6 +323,52 @@ namespace bet_fred.Controllers
                 CustomerId = betRecord.CustomerId,
                 CustomerName = betRecord.Customer?.Name
             };
+        }
+
+        [HttpGet("{id:int}/status")]
+        public async Task<ActionResult<object>> GetBetStatus(int id)
+        {
+            try
+            {
+                var bets = await _dataService.GetBetRecordsAsync();
+                var bet = bets.FirstOrDefault(b => b.Id == id);
+                if (bet == null) return NotFound();
+                return Ok(new { bet.Id, bet.WriterClassification, bet.ClassificationConfidence });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting bet status {Id}", id);
+                return StatusCode(500, "Error retrieving status");
+            }
+        }
+
+        [HttpGet("classification-updates")]
+        public async Task ClassificationUpdates()
+        {
+            Response.Headers["Cache-Control"] = "no-cache";
+            Response.Headers["Content-Type"] = "text/event-stream";
+            Response.Headers["X-Accel-Buffering"] = "no";
+
+            var subscription = _updateNotifier.Subscribe();
+            Guid id = subscription.Id;
+            var reader = subscription.Reader;
+            try
+            {
+                await foreach (var update in reader.ReadAllAsync(HttpContext.RequestAborted))
+                {
+                    var json = System.Text.Json.JsonSerializer.Serialize(update);
+                    await Response.WriteAsync($"data: {json}\n\n");
+                    await Response.Body.FlushAsync();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // client disconnected
+            }
+            finally
+            {
+                _updateNotifier.Unsubscribe(id);
+            }
         }
     }
 }
