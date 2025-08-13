@@ -23,18 +23,14 @@ namespace bet_fred
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=betfred.db"));
 
-            // Register services
+            // Register services (lean MVP)
             builder.Services.AddScoped<IDataService, DataService>();
             builder.Services.AddScoped<IThresholdEvaluator, ThresholdEvaluator>();
-            builder.Services.AddSingleton<IClassificationBackgroundQueue, ClassificationBackgroundQueue>();
-            builder.Services.AddSingleton<IClassificationUpdateNotifier, ClassificationUpdateNotifier>();
-            builder.Services.AddHostedService<ClassificationProcessingService>();
 
             // Register HttpClient for CV service
             builder.Services.AddHttpClient<IClassificationService, ClassificationService>();
 
-            // Register background service for threshold monitoring
-            builder.Services.AddHostedService<ThresholdHostedService>();
+            // ThresholdHostedService disabled for MVP
 
             // Add default configuration for Classification API if not present
             if (!builder.Configuration.GetSection("ClassificationApi").Exists())

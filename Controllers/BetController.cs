@@ -15,23 +15,18 @@ namespace bet_fred.Controllers
         private readonly IClassificationService _classificationService;
         private readonly IThresholdEvaluator _thresholdEvaluator;
         private readonly ILogger<BetController> _logger;
-        private readonly IClassificationBackgroundQueue _classificationQueue;
-        private readonly IClassificationUpdateNotifier _updateNotifier;
+        // MVP: remove background queue and SSE notifier
 
         public BetController(
             IDataService dataService,
             IClassificationService classificationService,
             IThresholdEvaluator thresholdEvaluator,
-            ILogger<BetController> logger,
-        IClassificationBackgroundQueue classificationQueue,
-        IClassificationUpdateNotifier updateNotifier)
+            ILogger<BetController> logger)
         {
             _dataService = dataService;
             _classificationService = classificationService;
             _thresholdEvaluator = thresholdEvaluator;
             _logger = logger;
-            _classificationQueue = classificationQueue;
-            _updateNotifier = updateNotifier;
         }
 
         [HttpGet]
@@ -106,7 +101,7 @@ namespace bet_fred.Controllers
 
             try
             {
-                // First create a new bet record
+                // First create a new bet record (do not store image in DB for MVP)
                 var newBet = new BetRecord
                 {
                     Amount = amount ?? 0, // Amount provided at upload time (stake)
@@ -118,12 +113,22 @@ namespace bet_fred.Controllers
                 using var memoryStream = new MemoryStream();
                 await file.CopyToAsync(memoryStream);
                 var imageData = memoryStream.ToArray();
-                var success = await _dataService.UploadSlipAsync(createdBet.Id, imageData);
-                if (!success)
-                    return BadRequest("Failed to upload slip");
 
-                _classificationQueue.Enqueue(createdBet.Id, imageData);
-                _logger.LogInformation("Enqueued bet {BetId} for background classification", createdBet.Id);
+                // Synchronous classification for MVP
+                if (await _classificationService.IsServiceHealthyAsync())
+                {
+                    var (writerId, confidence) = await _classificationService.ClassifyHandwritingAsync(imageData, createdBet.Id);
+                    if (writerId != null && confidence.HasValue)
+                    {
+                        await _dataService.UpdateBetClassificationAsync(createdBet.Id, writerId, confidence.Value);
+                        // Re-fetch to return updated values
+                        var bets = await _dataService.GetBetRecordsAsync();
+                        var bet = bets.FirstOrDefault(b => b.Id == createdBet.Id);
+                        return Ok(MapToBetRecordDto(bet ?? createdBet));
+                    }
+                }
+
+                // If classification failed, return the created bet as-is
                 return Ok(MapToBetRecordDto(createdBet));
             }
             catch (Exception ex)
@@ -342,32 +347,19 @@ namespace bet_fred.Controllers
             }
         }
 
-        [HttpGet("classification-updates")]
-        public async Task ClassificationUpdates()
+        // DEV ONLY: clear all bets
+        [HttpPost("clear")]
+        public async Task<ActionResult> ClearAllBets()
         {
-            Response.Headers["Cache-Control"] = "no-cache";
-            Response.Headers["Content-Type"] = "text/event-stream";
-            Response.Headers["X-Accel-Buffering"] = "no";
-
-            var subscription = _updateNotifier.Subscribe();
-            Guid id = subscription.Id;
-            var reader = subscription.Reader;
             try
             {
-                await foreach (var update in reader.ReadAllAsync(HttpContext.RequestAborted))
-                {
-                    var json = System.Text.Json.JsonSerializer.Serialize(update);
-                    await Response.WriteAsync($"data: {json}\n\n");
-                    await Response.Body.FlushAsync();
-                }
+                await _dataService.ClearAllBetsAsync();
+                return Ok(new { message = "All bets cleared" });
             }
-            catch (OperationCanceledException)
+            catch (Exception ex)
             {
-                // client disconnected
-            }
-            finally
-            {
-                _updateNotifier.Unsubscribe(id);
+                _logger.LogError(ex, "Error clearing all bets");
+                return StatusCode(500, "Error clearing bets");
             }
         }
     }

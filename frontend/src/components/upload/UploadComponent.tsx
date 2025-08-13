@@ -237,6 +237,9 @@ const UploadComponent: React.FC = () => {
                       name="amount"
                       value={betData.amount}
                       onChange={handleInputChange}
+                      step="0.01"
+                      min="0"
+                      inputMode="decimal"
                       required
                     />
                   </Form.Group>
@@ -282,7 +285,9 @@ const UploadComponent: React.FC = () => {
                       </div>
                       <p className="mb-1">
                         <span className="badge bg-info">
-                          {bet.writerClassification || 'Not classified'}
+                          {bet.writerClassification && bet.writerClassification !== '0' 
+                            ? `Writer ${bet.writerClassification}` 
+                            : 'Not classified'}
                         </span>
                       </p>
                       <small>Customer: {bet.customerName || 'Unknown'}</small>

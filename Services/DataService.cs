@@ -30,6 +30,9 @@ namespace bet_fred.Services
         // DASHBOARD OPERATIONS
         Task<object> GetDashboardStatsAsync();
         Task<IEnumerable<Alert>> GetAlertsAsync();
+
+        // DEV UTILITIES
+        Task ClearAllBetsAsync();
     }
 
     public class DataService : IDataService
@@ -274,6 +277,13 @@ namespace bet_fred.Services
                 _logger.LogError(ex, "Error updating bet record {BetId}", betRecord.Id);
                 return null;
             }
+        }
+
+        public async Task ClearAllBetsAsync()
+        {
+            // Remove all bet records quickly
+            _context.BetRecords.RemoveRange(_context.BetRecords);
+            await _context.SaveChangesAsync();
         }
     }
 }

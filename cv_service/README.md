@@ -4,9 +4,7 @@ A machine learning service to classify handwritten bet slips for safer gambling 
 
 ## Management Tools
 
-This service includes simple management tools:
-
-- **train.py**: Tool to train the classification models
+- **train.py**: Train the classification model
 - **run_api.py**: Launch the API server
 
 ## Overview
@@ -18,7 +16,7 @@ This service provides a REST API for classifying handwritten bet slips to identi
 - **EfficientNet Classification**: Uses EfficientNet-B0 as the primary model for optimal accuracy-efficiency balance
 - **REST API**: Easy integration with the BetFred .NET application
 - **Confidence Scoring**: Provides confidence levels for each classification
-- **Robust Preprocessing**: Handles image variations with advanced preprocessing
+- **Preprocessing**: Matches training pipeline (resize, grayscale to 3ch, normalize)
 - **Fallback Mechanism**: Automatically falls back to DenseNet121 if the EfficientNet model is unavailable
 
 ## Models
@@ -47,7 +45,7 @@ The service uses a model hierarchy:
 pip install -r requirements.txt
 ```
 
-2. Train the models:
+1. Train the models:
 
 ```bash
 python train.py
@@ -68,7 +66,6 @@ The API will be available at `http://localhost:8001`.
 - **POST /classify-anonymous**: Classify handwritten bet slips
 - **GET /health**: Check API health status
 - **GET /model-info**: Get model information
-- **GET /demo-status**: Check demo configuration status
 
 ### Python Client Example
 
@@ -87,29 +84,21 @@ print(json.dumps(results, indent=2))
 
 ## Additional Tools
 
-This service includes several additional tools:
+This service includes an optional diagnostic:
 
-- **api_diagnostics.py**: Tool to check system status and model availability
-
-- **create_dummy_models.py**: Create placeholder models for testing
+- **api_diagnostics.py**: Check system status and model availability
 
 ## Configuration
 
 Configuration is unified in a single file: `src/utils/config.py`.
 
 This includes:
+
 - Model configuration
-- Demo settings
 - Path configurations
-- Performance thresholds 
-
-The system supports two modes:
-- **Production Mode**: Uses all 13 writers with full dataset
-- **Demo Mode**: Uses a subset of 5 writers for demonstration purposes
-
+- Performance thresholds
 - Model parameters
 - Image sizes
-- Confidence thresholds
 - File paths
 
 ## Training
@@ -130,7 +119,7 @@ This will:
 
 ## Demo Mode
 
-The service includes a demo mode that can be enabled by creating a `demo_config.py` file at the root directory with specific writer configurations.
+Removed. The service now always runs with the trained model outputs.
 
 ## Integration
 
