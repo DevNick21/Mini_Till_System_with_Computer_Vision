@@ -31,6 +31,7 @@ try:
         PREPROCESS_CLAHE,
         MEDIUM_CONFIDENCE_THRESHOLD,
         ID_TO_WRITER,
+        BEST_MODEL_NAME,
     )
 except ImportError as e:
     print(f"❌ Import error: {e}")
@@ -92,8 +93,7 @@ def initialize_model():
         logger.info(f"Using device: {_device}")
 
         # Check if the EfficientNet model is available
-        efficientnet_path = os.path.join(
-            MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")
+        efficientnet_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
 
         # Load EfficientNet model
         if os.path.exists(efficientnet_path):
@@ -163,172 +163,93 @@ async def health_check():
     }
 
 
-@app.post("/classify-anonymous", response_model=ClassificationResponse)
-async def classify_handwriting(files: List[UploadFile] = File(...)):
-    """
-    Classify handwriting samples and return anonymous writer IDs
-    """
+@app.post("/classify-anonymous", response_model=ClassificationResult)
+async def classify_handwriting(file: UploadFile = File(...)):
+    """Classify a single handwriting slip and return one result"""
 
     if _model is None:
         raise HTTPException(
             status_code=503, detail="Classification model not loaded")
 
-    if not files:
-        raise HTTPException(status_code=400, detail="No files provided")
+    if not file:
+        raise HTTPException(status_code=400, detail="No file provided")
 
-    logger.info(f"Processing {len(files)} slip images for classification")
+    logger.info(f"Processing slip image for classification: {file.filename}")
 
-    results = []
-    processing_errors = []
-
-    for file_idx, file in enumerate(files):
+    # Extract slip ID from filename (format: "123.jpg")
+    slip_id = 1
+    if file.filename and '.' in file.filename:
+        slip_id_str = file.filename.split('.')[0]
         try:
-            # FIX: Better filename parsing
-            logger.info(f"Processing file: {file.filename}")
+            slip_id = int(slip_id_str)
+            logger.info(f"Extracted SlipId: {slip_id}")
+        except ValueError:
+            logger.warning(
+                f"Could not parse slip ID from filename: {file.filename}; defaulting to 1")
 
-            # Extract slip ID from filename (format: "123.jpg")
-            if file.filename and '.' in file.filename:
-                slip_id_str = file.filename.split('.')[0]
-                try:
-                    slip_id = int(slip_id_str)
-                    logger.info(f"Extracted SlipId: {slip_id}")
-                except ValueError:
-                    logger.error(
-                        f"Could not parse slip ID from filename: {file.filename}")
-                    slip_id = file_idx + 1  # Fallback to index-based ID
-            else:
-                logger.error(f"Invalid filename format: {file.filename}")
-                slip_id = file_idx + 1  # Fallback to index-based ID
-
-            # Read and decode image
-            image_data = await file.read()
-            nparr = np.frombuffer(image_data, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-
-            if img is None:
-                raise ValueError(f"Could not decode image {file.filename}")
-
-            logger.info(f"Image decoded successfully: {img.shape}")
-
-            # Optional CLAHE, controlled by config; default off to match training
-            if PREPROCESS_CLAHE:
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                img = clahe.apply(img)
-
-            # Convert to tensor and apply transformations
-            img_tensor = _transform(img).unsqueeze(0).to(_device)
-
-            # Model inference
-            with torch.no_grad():
-                outputs = _model(img_tensor)
-                probabilities = torch.softmax(outputs, dim=1)
-
-                # Debug: log top-3 predictions to diagnose collapse
-                try:
-                    topk_conf, topk_idx = torch.topk(
-                        probabilities, k=min(3, probabilities.size(1)), dim=1)
-                    top_items = []
-                    for rank in range(topk_idx.size(1)):
-                        cls_idx = topk_idx[0, rank].item()
-                        writer_one_based = cls_idx + 1
-                        writer_name = ID_TO_WRITER.get(
-                            cls_idx, f"id{writer_one_based}")
-                        top_items.append(
-                            f"{writer_name}({writer_one_based})={topk_conf[0, rank].item():.3f}")
-                    logger.info(f"Top-3: " + ", ".join(top_items))
-                except Exception as _e:
-                    logger.debug(f"Top-k logging skipped: {_e}")
-
-                # Standard behavior - consider all writers
-                confidence, predicted_id = torch.max(probabilities, 1)
-
-                # FIX: Ensure writer ID is 1-based (model outputs 0-12, we want 1-13)
-                writer_id = predicted_id.item() + 1
-                confidence_score = confidence.item()
-
-                # No demo overrides; use real model outputs
-
-                # Get display name if available (ID_TO_WRITER is 0-based)
-                writer_display = ID_TO_WRITER.get(
-                    writer_id - 1, f"Writer {writer_id}")
-
-                logger.info(
-                    f"Model prediction: writer_id={writer_id} ({writer_display}), confidence={confidence_score:.3f}")
-
-                # Threshold for business logic can be tuned via config constants if needed
-                threshold = MEDIUM_CONFIDENCE_THRESHOLD
-
-                # Determine confidence level for business logic
-                if confidence_score >= 0.9:
-                    conf_level = "high"
-                elif confidence_score >= threshold:
-                    conf_level = "medium"
-                else:
-                    conf_level = "low"
-
-                result = ClassificationResult(
-                    slip_id=slip_id,
-                    writer_id=writer_id,
-                    confidence=confidence_score,
-                    confidence_level=conf_level
-                )
-
-                results.append(result)
-
-                logger.info(
-                    f"Classified Slip #{slip_id}: Writer {writer_id} ({confidence_score:.3f}, {conf_level})")
-
-        except ValueError as e:
-            error_msg = f"Invalid filename format: {file.filename} - {str(e)}"
-            processing_errors.append(error_msg)
-            logger.warning(error_msg)
-
-        except Exception as e:
-            error_msg = f"Error processing {file.filename}: {str(e)}"
-            processing_errors.append(error_msg)
-            logger.error(error_msg)
-
-    # ... rest of the method stays the same
-    if not results and processing_errors:
-        # All files failed to process
+    # Read and decode image
+    image_data = await file.read()
+    nparr = np.frombuffer(image_data, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
+    if img is None:
         raise HTTPException(
-            status_code=400,
-            detail=f"Failed to process any files. Errors: {'; '.join(processing_errors)}"
+            status_code=400, detail=f"Could not decode image {file.filename}")
+
+    logger.info(f"Image decoded successfully: {img.shape}")
+
+    # Optional CLAHE, controlled by config; default off to match training
+    if PREPROCESS_CLAHE:
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        img = clahe.apply(img)
+
+    # Convert to tensor and apply transformations
+    img_tensor = _transform(img).unsqueeze(0).to(_device)
+
+    # Model inference
+    with torch.no_grad():
+        outputs = _model(img_tensor)
+        probabilities = torch.softmax(outputs, dim=1)
+
+        # Debug: log top-3 predictions
+        try:
+            topk_conf, topk_idx = torch.topk(
+                probabilities, k=min(3, probabilities.size(1)), dim=1)
+            top_items = []
+            for rank in range(topk_idx.size(1)):
+                cls_idx = topk_idx[0, rank].item()
+                writer_one_based = cls_idx + 1
+                writer_name = ID_TO_WRITER.get(
+                    cls_idx, f"id{writer_one_based}")
+                top_items.append(
+                    f"{writer_name}({writer_one_based})={topk_conf[0, rank].item():.3f}")
+            logger.info("Top-3: " + ", ".join(top_items))
+        except Exception as _e:
+            logger.debug(f"Top-k logging skipped: {_e}")
+
+        confidence, predicted_id = torch.max(probabilities, 1)
+        writer_id = predicted_id.item() + 1
+        confidence_score = confidence.item()
+
+        writer_display = ID_TO_WRITER.get(writer_id - 1, f"Writer {writer_id}")
+        logger.info(
+            f"Model prediction: writer_id={writer_id} ({writer_display}), confidence={confidence_score:.3f}")
+
+        threshold = MEDIUM_CONFIDENCE_THRESHOLD
+        if confidence_score >= 0.9:
+            conf_level = "high"
+        elif confidence_score >= threshold:
+            conf_level = "medium"
+        else:
+            conf_level = "low"
+
+        result = ClassificationResult(
+            slip_id=slip_id,
+            writer_id=writer_id,
+            confidence=confidence_score,
+            confidence_level=conf_level,
         )
 
-    # Calculate summary statistics
-    high_conf_count = len([r for r in results if r.confidence_level == "high"])
-    medium_conf_count = len(
-        [r for r in results if r.confidence_level == "medium"])
-    low_conf_count = len([r for r in results if r.confidence_level == "low"])
-    threshold_eligible = len(
-        [r for r in results if r.confidence >= MEDIUM_CONFIDENCE_THRESHOLD])
-
-    response = ClassificationResponse(
-        results=results,
-        summary={
-            # Use camelCase keys for summary
-            "totalProcessed": len(results),
-            "highConfidence": high_conf_count,
-            "mediumConfidence": medium_conf_count,
-            "lowConfidence": low_conf_count,
-            "thresholdEligible": threshold_eligible,
-            "processingErrors": len(processing_errors),
-            "averageConfidence": sum(r.confidence for r in results) / len(results) if results else 0,
-            "uniqueWriters": len(set(r.writer_id for r in results))
-        },
-        timestamp=datetime.utcnow().isoformat()
-    )
-
-    logger.info(
-        f"Classification complete: {len(results)} classified, {threshold_eligible} eligible for thresholds")
-
-    if processing_errors:
-        logger.warning(
-            f"⚠️  {len(processing_errors)} files had processing errors")
-
-    # Ensure JSON uses camelCase aliases
-    return response.model_dump(by_alias=True)
+    return result.model_dump(by_alias=True)
 
 
 @app.get("/model-info")

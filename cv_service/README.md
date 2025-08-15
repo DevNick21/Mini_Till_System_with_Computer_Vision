@@ -9,22 +9,21 @@ A machine learning service to classify handwritten bet slips for safer gambling 
 
 ## Overview
 
-This service provides a REST API for classifying handwritten bet slips to identify individual writers. It uses EfficientNet as the primary model with DenseNet as fallback, ensuring high accuracy and robustness.
+This service provides a REST API for classifying handwritten bet slips to identify individual writers. It uses EfficientNet as the single model, ensuring high accuracy and a simple, robust pipeline.
 
 ## Features
 
-- **EfficientNet Classification**: Uses EfficientNet-B0 as the primary model for optimal accuracy-efficiency balance
+- **EfficientNet Classification**: Uses EfficientNet-B0 as the model for optimal accuracy-efficiency balance
 - **REST API**: Easy integration with the BetFred .NET application
 - **Confidence Scoring**: Provides confidence levels for each classification
 - **Preprocessing**: Matches training pipeline (resize, grayscale to 3ch, normalize)
-- **Fallback Mechanism**: Automatically falls back to DenseNet121 if the EfficientNet model is unavailable
+  
 
 ## Models
 
 The service uses a model hierarchy:
 
-1. **EfficientNet-B0**: Primary model - optimized architecture balancing accuracy and computational efficiency
-2. **DenseNet121**: Fallback model - dense connections for improved gradient flow
+1. **EfficientNet-B0**: Optimized architecture balancing accuracy and computational efficiency
 
 ## Installation
 
@@ -63,7 +62,7 @@ The API will be available at `http://localhost:8001`.
 
 ### API Endpoints
 
-- **POST /classify-anonymous**: Classify handwritten bet slips
+- **POST /classify-anonymous**: Classify a single handwritten bet slip
 - **GET /health**: Check API health status
 - **GET /model-info**: Get model information
 
@@ -74,12 +73,12 @@ import requests
 import json
 
 url = "http://localhost:8001/classify-anonymous"
-files = [("files", ("123.jpg", open("path/to/slip.jpg", "rb")))]
+files = {"file": ("123.jpg", open("path/to/slip.jpg", "rb"))}
 
 response = requests.post(url, files=files)
-results = response.json()
+result = response.json()
 
-print(json.dumps(results, indent=2))
+print(json.dumps(result, indent=2))
 ```
 
 ## Additional Tools
@@ -111,11 +110,9 @@ python -m src.training.train_model
 
 This will:
 
-1. Train individual models (ResNet18, EfficientNet, DenseNet)
-2. Evaluate their performance
-3. Identify the best-performing model (EfficientNet)
-4. Save all model weights and configurations
-5. Set up EfficientNet as the primary model and DenseNet as fallback
+1. Train the EfficientNet model
+2. Evaluate its performance
+3. Save the best model weights and configurations
 
 ## Demo Mode
 

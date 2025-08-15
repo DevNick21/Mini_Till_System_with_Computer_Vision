@@ -52,8 +52,8 @@ namespace bet_fred.Services
                 var imageContent = new ByteArrayContent(imageData);
                 imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
 
-                // Add the file with the bet ID as the filename
-                content.Add(imageContent, "files", $"{betId}.jpg");
+                // Add the single file with the bet ID as the filename (API expects 'file')
+                content.Add(imageContent, "file", $"{betId}.jpg");
 
                 // Set timeout for the request
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
@@ -66,12 +66,9 @@ namespace bet_fred.Services
                 {
                     var responseBody = await response.Content.ReadAsStringAsync();
                     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-                    var result = JsonSerializer.Deserialize<ClassificationResponse>(responseBody, options);
+                    var classification = JsonSerializer.Deserialize<SingleClassificationResult>(responseBody, options);
 
-                    // Extract the classification result for this bet ID
-                    var classification = result?.Results.FirstOrDefault();
-
-                    if (classification != null)
+                    if (classification is not null)
                     {
                         _logger.LogInformation(
                             "Classification successful for bet {BetId}: Writer={WriterId}, Confidence={Confidence:P2}",
@@ -80,14 +77,10 @@ namespace bet_fred.Services
                             classification.Confidence
                         );
 
-                        // Return writer ID (as string) and confidence
                         return (classification.WriterId.ToString(), classification.Confidence);
                     }
-                    else
-                    {
-                        _logger.LogWarning("Classification response contained no results for bet {BetId}", betId);
-                        return (null, null);
-                    }
+                    _logger.LogWarning("Classification response invalid for bet {BetId}", betId);
+                    return (null, null);
                 }
                 else
                 {
@@ -153,30 +146,12 @@ namespace bet_fred.Services
         }
     }
 
-    // Helper classes to deserialize the API response
-    internal class ClassificationResult
+    // Helper class to deserialize the single-result API response
+    internal class SingleClassificationResult
     {
         public int SlipId { get; set; }
         public int WriterId { get; set; }
         public double Confidence { get; set; }
         public string ConfidenceLevel { get; set; } = string.Empty;
-        public bool? ModelAgreement { get; set; }
-    }
-
-    internal class ModelPrediction
-    {
-        public string ModelName { get; set; } = string.Empty;
-        public int WriterId { get; set; }
-        public string WriterName { get; set; } = string.Empty;
-        public double Confidence { get; set; }
-        public string ConfidenceLevel { get; set; } = string.Empty;
-    }
-
-    internal class ClassificationResponse
-    {
-        public List<ClassificationResult> Results { get; set; } = new();
-        public List<ModelPrediction>? ModelPredictions { get; set; }
-        public Dictionary<string, object> Summary { get; set; } = new();
-        public string Timestamp { get; set; } = string.Empty;
     }
 }
