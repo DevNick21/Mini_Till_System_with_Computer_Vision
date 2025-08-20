@@ -23,7 +23,21 @@ namespace bet_fred.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<int>("CustomerId")
+                    b.Property<string>("AlertType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("BetRecordId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CustomerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsResolved")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Message")
@@ -31,10 +45,25 @@ namespace bet_fred.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTime>("TriggeredAt")
+                    b.Property<string>("ResolutionNotes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResolvedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BetRecordId");
 
                     b.HasIndex("CustomerId");
 
@@ -48,26 +77,16 @@ namespace bet_fred.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("Amount")
-                        .HasColumnType("TEXT");
+                        .HasColumnType("decimal(18,2)");
 
-                    b.Property<string>("BetType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("TEXT");
+                    b.Property<double?>("ClassificationConfidence")
+                        .HasColumnType("REAL");
 
                     b.Property<int?>("CustomerId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("TEXT");
-
                     b.Property<byte[]>("ImageData")
-                        .IsRequired()
                         .HasColumnType("BLOB");
-
-                    b.Property<float?>("Odds")
-                        .HasColumnType("REAL");
 
                     b.Property<int>("Outcome")
                         .HasColumnType("INTEGER");
@@ -75,9 +94,7 @@ namespace bet_fred.Migrations
                     b.Property<DateTime>("PlacedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Sport")
-                        .IsRequired()
-                        .HasMaxLength(50)
+                    b.Property<string>("WriterClassification")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -93,74 +110,40 @@ namespace bet_fred.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTime>("FirstSeen")
+                    b.Property<string>("Address")
+                        .IsRequired()
+                        .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
-                    b.Property<bool>("IsTagged")
-                        .HasColumnType("INTEGER");
+                    b.Property<decimal>("BetLimit")
+                        .HasColumnType("decimal(18,2)");
 
-                    b.Property<string>("TagName")
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RiskLevel")
+                        .IsRequired()
+                        .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
                     b.ToTable("Customers");
-                });
-
-            modelBuilder.Entity("bet_fred.Models.HandwritingCluster", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("BetRecordId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("ClusterId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("CustomerId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BetRecordId");
-
-                    b.HasIndex("CustomerId");
-
-                    b.ToTable("HandwritingClusters");
-                });
-
-            modelBuilder.Entity("bet_fred.Models.PendingTag", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("BetRecordId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("CustomerId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("Tag")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BetRecordId");
-
-                    b.HasIndex("CustomerId");
-
-                    b.ToTable("PendingTags");
                 });
 
             modelBuilder.Entity("bet_fred.Models.ThresholdRule", b =>
@@ -169,7 +152,15 @@ namespace bet_fred.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<int?>("CustomerId")
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Name")
@@ -177,8 +168,13 @@ namespace bet_fred.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
-                    b.Property<TimeSpan>("Period")
+                    b.Property<string>("RuleType")
+                        .IsRequired()
+                        .HasMaxLength(50)
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("TimeWindowMinutes")
+                        .HasColumnType("INTEGER");
 
                     b.Property<decimal>("Value")
                         .HasColumnType("TEXT");
@@ -186,24 +182,19 @@ namespace bet_fred.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("ThresholdRules");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            Name = "Staked in a Day",
-                            Period = new TimeSpan(1, 0, 0, 0, 0),
-                            Value = 500m
-                        });
                 });
 
             modelBuilder.Entity("bet_fred.Models.Alert", b =>
                 {
+                    b.HasOne("bet_fred.Models.BetRecord", "BetRecord")
+                        .WithMany()
+                        .HasForeignKey("BetRecordId");
+
                     b.HasOne("bet_fred.Models.Customer", "Customer")
                         .WithMany("Alerts")
-                        .HasForeignKey("CustomerId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("CustomerId");
+
+                    b.Navigation("BetRecord");
 
                     b.Navigation("Customer");
                 });
@@ -217,47 +208,11 @@ namespace bet_fred.Migrations
                     b.Navigation("Customer");
                 });
 
-            modelBuilder.Entity("bet_fred.Models.HandwritingCluster", b =>
-                {
-                    b.HasOne("bet_fred.Models.BetRecord", "BetRecord")
-                        .WithMany()
-                        .HasForeignKey("BetRecordId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("bet_fred.Models.Customer", "Customer")
-                        .WithMany("HandwritingClusters")
-                        .HasForeignKey("CustomerId");
-
-                    b.Navigation("BetRecord");
-
-                    b.Navigation("Customer");
-                });
-
-            modelBuilder.Entity("bet_fred.Models.PendingTag", b =>
-                {
-                    b.HasOne("bet_fred.Models.BetRecord", "BetRecord")
-                        .WithMany()
-                        .HasForeignKey("BetRecordId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("bet_fred.Models.Customer", null)
-                        .WithMany("PendingTags")
-                        .HasForeignKey("CustomerId");
-
-                    b.Navigation("BetRecord");
-                });
-
             modelBuilder.Entity("bet_fred.Models.Customer", b =>
                 {
                     b.Navigation("Alerts");
 
                     b.Navigation("BetRecords");
-
-                    b.Navigation("HandwritingClusters");
-
-                    b.Navigation("PendingTags");
                 });
 #pragma warning restore 612, 618
         }

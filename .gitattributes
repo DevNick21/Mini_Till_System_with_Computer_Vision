@@ -1,2 +1,17 @@
-lightning_logs/**/*.ckpt filter=lfs diff=lfs merge=lfs -text
-lightning_logs/ filter=lfs diff=lfs merge=lfs -text
+## Track large/binary assets with Git LFS
+
+# Handwritten slip images used by the CV service
+cv_service/slips/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+cv_service/slips/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
+
+# PDF sources for slips
+slips_pdf/**/*.pdf filter=lfs diff=lfs merge=lfs -text
+
+# Trained model weights and artifacts (if committed)
+cv_service/trained_models/**/*.pt filter=lfs diff=lfs merge=lfs -text
+cv_service/trained_models/**/*.pth filter=lfs diff=lfs merge=lfs -text
+cv_service/trained_models/**/*.ckpt filter=lfs diff=lfs merge=lfs -text
+cv_service/trained_models/**/*.onnx filter=lfs diff=lfs merge=lfs -text
+
+# SQLite database (binary)
+*.db filter=lfs diff=lfs merge=lfs -text

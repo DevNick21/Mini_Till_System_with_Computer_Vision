@@ -1,129 +1,160 @@
-// bet_fred/Services/ThresholdEvaluator.cs
-
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
 using bet_fred.Data;
 using bet_fred.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace bet_fred.Services
 {
-    public class ThresholdEvaluator
+    public interface IThresholdEvaluator
     {
-        private readonly ApplicationDbContext _db;
+        Task<IEnumerable<Alert>> EvaluateThresholdsAsync();
+        Task<IEnumerable<Alert>> EvaluateThresholdsForCustomerAsync(int customerId);
+        Task<bool> ProcessBetForThresholdsAsync(BetRecord bet);
+    }
 
-        public ThresholdEvaluator(ApplicationDbContext db)
+    public class ThresholdEvaluator : IThresholdEvaluator
+    {
+        private readonly ApplicationDbContext _context;
+        private readonly ILogger<ThresholdEvaluator> _logger;
+
+        public ThresholdEvaluator(ApplicationDbContext context, ILogger<ThresholdEvaluator> logger)
         {
-            _db = db;
+            _context = context;
+            _logger = logger;
         }
 
         /// <summary>
-        /// Scans all threshold rules.
-        /// - For global rules (CustomerId == null), creates PendingTag entries.
-        /// - For customer-specific rules, creates Alert entries.
-        /// Returns the list of newly created PendingTags.
+        /// Evaluates all active threshold rules against all customers
         /// </summary>
-        public async Task<List<PendingTag>> EvaluateAsync()
+        /// <returns>Generated alerts from threshold violations</returns>
+        public async Task<IEnumerable<Alert>> EvaluateThresholdsAsync()
         {
-            var now   = DateTime.UtcNow;
-            var rules = await _db.ThresholdRules.ToListAsync();
+            _logger.LogInformation("Evaluating thresholds for all customers");
+            var generatedAlerts = new List<Alert>();
 
-            var newTags   = new List<PendingTag>();
-            var newAlerts = new List<Alert>();
-
-            //
-            // 1) GLOBAL RULES → PendingTags
-            //
-            foreach (var rule in rules.Where(r => r.CustomerId == null))
+            try
             {
-                var cutoff = now - rule.Period;
-
-                // only bets placed within window
-                var records = await _db.HandwritingClusters
-                    .Where(h => h.BetRecord.PlacedAt >= cutoff)
-                    .Select(h => new {
-                        h.ClusterId,
-                        Amount      = h.BetRecord.Amount,
-                        h.BetRecordId
-                    })
+                // Get all active rules
+                var activeRules = await _context.ThresholdRules
+                    .Where(r => r.IsActive)
                     .ToListAsync();
 
-                var metrics = records
-                    .GroupBy(r => r.ClusterId)
-                    .Select(g => new {
-                        Cluster = g.Key,
-                        Total   = g.Sum(r => r.Amount)
-                    })
-                    .ToList();
-
-                foreach (var m in metrics)
+                if (!activeRules.Any())
                 {
-                    if (m.Total < rule.Value)
-                        continue;
-
-                    var tagKey = $"{rule.Name}|{m.Cluster}";
-
-                    // skip if we've already created one
-                    if (await _db.PendingTags.AnyAsync(t => t.Tag == tagKey))
-                        continue;
-
-                    // pick a sample slip for preview
-                    var sampleId = await _db.HandwritingClusters
-                        .Where(h => h.ClusterId == m.Cluster)
-                        .Select(h => h.BetRecordId)
-                        .FirstAsync();
-
-                    newTags.Add(new PendingTag
-                    {
-                        BetRecordId = sampleId,
-                        Tag         = tagKey,
-                        CreatedAt   = now
-                    });
+                    _logger.LogInformation("No active threshold rules found");
+                    return generatedAlerts;
                 }
-            }
 
-            //
-            // 2) CUSTOMER-SPECIFIC RULES → Alerts
-            //
-            foreach (var rule in rules.Where(r => r.CustomerId != null))
-            {
-                var cutoff = now - rule.Period;
-                var cid    = rule.CustomerId!.Value;
+                // Get all customers
+                var customers = await _context.Customers.ToListAsync();
 
-                // sum bets on clusters already tagged to that customer
-                var total = await _db.HandwritingClusters
-                    .Where(h => h.CustomerId == cid
-                             && h.BetRecord.PlacedAt >= cutoff)
-                    .SumAsync(h => h.BetRecord.Amount);
-
-                if (total < rule.Value)
-                    continue;
-
-                // idempotency: one alert per customer+rule
-                bool exists = await _db.Alerts
-                    .AnyAsync(a => a.CustomerId == cid && a.RuleId == rule.Id);
-                if (exists)
-                    continue;
-
-                newAlerts.Add(new Alert
+                foreach (var customer in customers)
                 {
-                    CustomerId  = cid,
-                    RuleId      = rule.Id,
-                    Message     = $"Customer {cid} exceeded rule '{rule.Name}' with total {total:C}.",
-                    TriggeredAt = now
-                });
+                    var customerAlerts = await EvaluateThresholdsForCustomerAsync(customer.Id);
+                    generatedAlerts.AddRange(customerAlerts);
+                }
+
+                _logger.LogInformation("Threshold evaluation complete. Generated {AlertCount} alerts", generatedAlerts.Count);
+                return generatedAlerts;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error evaluating thresholds");
+                return generatedAlerts;
+            }
+        }
+
+        /// <summary>
+        /// Evaluates all active threshold rules for a specific customer
+        /// </summary>
+        /// <param name="customerId">Customer ID to evaluate</param>
+        /// <returns>Generated alerts from threshold violations</returns>
+        public async Task<IEnumerable<Alert>> EvaluateThresholdsForCustomerAsync(int customerId)
+        {
+            _logger.LogInformation("Evaluating thresholds for customer {CustomerId}", customerId);
+            var generatedAlerts = new List<Alert>();
+
+            try
+            {
+                // Get customer
+                var customer = await _context.Customers
+                    .Include(c => c.BetRecords)
+                    .FirstOrDefaultAsync(c => c.Id == customerId);
+
+                if (customer == null)
+                {
+                    _logger.LogWarning("Customer {CustomerId} not found", customerId);
+                    return generatedAlerts;
+                }
+
+                // Get all active rules
+                var activeRules = await _context.ThresholdRules
+                    .Where(r => r.IsActive)
+                    .ToListAsync();
+
+                if (!activeRules.Any())
+                {
+                    _logger.LogInformation("No active threshold rules found for customer {CustomerId}", customerId);
+                    return generatedAlerts;
+                }
+
+                foreach (var rule in activeRules)
+                {
+                    var timeWindow = DateTime.UtcNow.AddMinutes(-rule.TimeWindowMinutes);
+                    var totalStake = customer.BetRecords.Where(b => b.PlacedAt >= timeWindow).Sum(b => b.Amount);
+                    if (totalStake > rule.Value)
+                    {
+                        var alert = new Alert
+                        {
+                            AlertType = "ThresholdExceeded",
+                            Message = $"Customer '{customer.Name}' exceeded {rule.Name}: {totalStake:C} > {rule.Value:C} in {rule.TimeWindowMinutes}m",
+                            CustomerId = customer.Id,
+                            CreatedAt = DateTime.UtcNow,
+                            IsResolved = false
+                        };
+                        generatedAlerts.Add(alert);
+                        _context.Alerts.Add(alert);
+                        await _context.SaveChangesAsync();
+                    }
+                }
+
+                return generatedAlerts;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error evaluating thresholds for customer {CustomerId}", customerId);
+                return generatedAlerts;
+            }
+        }
+
+        /// <summary>
+        /// Processes a new bet for threshold violations
+        /// </summary>
+        /// <param name="bet">The bet record to evaluate</param>
+        /// <returns>True if processed successfully</returns>
+        public async Task<bool> ProcessBetForThresholdsAsync(BetRecord bet)
+        {
+            if (bet.CustomerId == null)
+            {
+                _logger.LogInformation("Bet {BetId} has no associated customer, skipping threshold evaluation", bet.Id);
+                return true;
             }
 
-            // 3) Persist any new tags or alerts
-            if (newTags.Count   > 0) _db.PendingTags.AddRange(newTags);
-            if (newAlerts.Count > 0) _db.Alerts      .AddRange(newAlerts);
-
-            if (newTags.Count + newAlerts.Count > 0)
-                await _db.SaveChangesAsync();
-
-            return newTags;
+            try
+            {
+                _logger.LogInformation("Processing bet {BetId} for customer {CustomerId} for thresholds", bet.Id, bet.CustomerId);
+                await EvaluateThresholdsForCustomerAsync(bet.CustomerId.Value);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing bet {BetId} for thresholds", bet.Id);
+                return false;
+            }
         }
+
+        /// <summary>
+        /// Evaluates a specific rule for a customer
+        /// </summary>
+    // Removed RuleType-specific evaluation and severity. All rules: total stake in window > value.
     }
 }

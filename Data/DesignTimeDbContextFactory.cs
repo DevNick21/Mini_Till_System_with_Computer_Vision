@@ -12,6 +12,9 @@ namespace bet_fred.Data
     public class DesignTimeDbContextFactory
         : IDesignTimeDbContextFactory<ApplicationDbContext>
     {
+        // Connection string name constant to avoid magic strings
+        private const string ConnectionStringName = "DefaultConnection";
+
         public ApplicationDbContext CreateDbContext(string[] args)
         {
             // 1) Build config (so we can read DefaultConnection)
@@ -22,8 +25,8 @@ namespace bet_fred.Data
                 .Build();
 
             // 2) Grab the connection string
-            var conn = config.GetConnectionString("DefaultConnection")
-                       ?? throw new InvalidOperationException("DefaultConnection not found");
+            var conn = config.GetConnectionString(ConnectionStringName)
+                       ?? throw new InvalidOperationException($"{ConnectionStringName} not found");
 
             // 3) Configure DbContextOptions to use SQLite
             var builder = new DbContextOptionsBuilder<ApplicationDbContext>();

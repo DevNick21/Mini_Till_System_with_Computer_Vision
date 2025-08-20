@@ -5,38 +5,34 @@ namespace bet_fred.Data
 {
     public class ApplicationDbContext : DbContext
     {
-        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
-            : base(options) { }
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options)
+        {
+        }
 
-        public DbSet<Customer> Customers { get; set; } = null!;
-        public DbSet<BetRecord> BetRecords { get; set; } = null!;
-        public DbSet<Alert> Alerts { get; set; } = null!;
-        public DbSet<PendingTag> PendingTags { get; set; } = null!;
-        public DbSet<HandwritingCluster> HandwritingClusters { get; set; } = null!;
-        public DbSet<ThresholdRule> ThresholdRules { get; set; } = null!;
+        public DbSet<Customer> Customers { get; set; }
+        public DbSet<BetRecord> BetRecords { get; set; }
+        public DbSet<Alert> Alerts { get; set; }
+        public DbSet<ThresholdRule> ThresholdRules { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
 
-            // Seed a single global rule: £5 000 max daily spend
-            modelBuilder.Entity<ThresholdRule>().HasData(
-                new ThresholdRule
-                {
-                    Id = 1,
-                    Name = "Staked in a Day",
-                    Value = 500m,
-                    Period = TimeSpan.FromDays(1),
-                    CustomerId = null
-                }
-            );
-            modelBuilder.Entity<HandwritingCluster>()
-                .HasIndex(h => h.BetRecordId)
-                .IsUnique();
+            // Configure relationships
+            modelBuilder.Entity<BetRecord>()
+                .HasOne(b => b.Customer)
+                .WithMany(c => c.BetRecords)
+                .HasForeignKey(b => b.CustomerId);
 
-            modelBuilder.Entity<PendingTag>()
-                .HasIndex(t => t.Tag)
-                .IsUnique();
+            modelBuilder.Entity<Alert>()
+                .HasOne(a => a.Customer)
+                .WithMany(c => c.Alerts)
+                .HasForeignKey(a => a.CustomerId);
+
+            // Configure decimal precision for amounts
+            modelBuilder.Entity<BetRecord>()
+                .Property(b => b.Amount)
+                .HasColumnType("decimal(18,2)");
         }
     }
 }

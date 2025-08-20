@@ -1,43 +1,42 @@
-using System;
 using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 
 namespace bet_fred.Models
 {
+    /// <summary>
+    /// Betting record with required slip image; outcome removed.
+    /// </summary>
     public class BetRecord
     {
-        [Key]
         public int Id { get; set; }
-
-        public DateTime PlacedAt { get; set; } = DateTime.UtcNow;
 
         [Required]
         public decimal Amount { get; set; }
 
-        [Required, StringLength(50)]
-        public string BetType { get; set; } = string.Empty;
+        public DateTime PlacedAt { get; set; } = DateTime.UtcNow;
 
-        [Required, StringLength(50)]
-        public string Sport { get; set; } = string.Empty;
-
-        [StringLength(500)]
-        public string? Description { get; set; }
-
-        public float? Odds { get; set; }
-
-        public enum BetOutcome { Unknown, Won, Lost }
-        public BetOutcome Outcome { get; set; } = BetOutcome.Unknown;
-
-        public int? CustomerId { get; set; }
-
-        // Navigation property to Customer (“<NavigationPropertyName>Id” EF convention)
-        [ForeignKey(nameof(CustomerId))]
-        public Customer Customer { get; set; } = null!;
-
-
-        [Column(TypeName = "BLOB")]
+        /// <summary>
+        /// Binary data of the uploaded betting slip image for handwriting analysis
+        /// </summary>
+        [Required]
         public byte[] ImageData { get; set; } = Array.Empty<byte>();
 
+        /// <summary>
+        /// Writer classification result from ML processing
+        /// </summary>
+        public string? WriterClassification { get; set; }
+
+        /// <summary>
+        /// Confidence level of the ML classification (0.0 to 1.0)
+        /// </summary>
+        public double? ClassificationConfidence { get; set; }
+
+        // Navigation properties
+        public int? CustomerId { get; set; }
+        public Customer? Customer { get; set; }
+
+        /// <summary>
+        /// Indicates if this bet has been processed by the ML classification pipeline
+        /// </summary>
+        public bool IsClassified => !string.IsNullOrEmpty(WriterClassification);
     }
 }
-

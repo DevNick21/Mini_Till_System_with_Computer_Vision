@@ -1,22 +1,29 @@
 # requirements.txt for cv_service (Python 3.11)
+# Updated: July 28, 2025
 
-# FastAPI web framework
-fastapi
-
-# Uvicorn ASGI server
-uvicorn[standard]
+# FastAPI web framework and dependencies
+fastapi==0.103.0
+uvicorn[standard]==0.23.2
+python-multipart==0.0.6
+pydantic==2.3.0
 
 # OpenCV without GUI deps (image decoding)
-opencv-python-headless
+opencv-python-headless==4.8.0.74
 
-# PyTorch CPU-only wheels (requires extra index below)
-torch
-torchvision
+# PyTorch CPU-only wheels
+torch==2.0.1
+torchvision==0.15.2
 
-# HDBSCAN clustering
-hdbscan
+# ML and feature extraction
+scikit-learn==1.3.0
+# Fix NumPy compatibility with PyTorch
+numpy==1.26.0
+pillow==10.0.0
+matplotlib==3.7.3
+seaborn==0.13.0
+pandas==2.0.3
 
-# Feature‐extraction support
-scikit-learn
-
-faiss-cpu
+# Utilities
+python-dotenv==1.0.0
+psutil==5.9.5
+requests==2.31.0
