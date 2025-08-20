@@ -36,7 +36,7 @@ os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
 # Performance thresholds
 MIN_ACCURACY_THRESHOLD = 0.75
 HIGH_CONFIDENCE_THRESHOLD = 0.9
-MEDIUM_CONFIDENCE_THRESHOLD = 0.6
+MEDIUM_CONFIDENCE_THRESHOLD = 0.75
 
 print(f"Configuration loaded:")
 print(f"  All Writers: {len(ALL_WRITERS)}")

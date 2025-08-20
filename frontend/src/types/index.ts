@@ -2,19 +2,14 @@ export interface BetRecord {
   id: number;
   amount: number;
   placedAt: string;
-  outcome: string;
   writerClassification?: string | null;
   classificationConfidence?: number | null;
   customerId?: number | null;
-  customerName?: string | null;
 }
 
 export interface Customer {
   id: number;
   name: string;
-  email: string;
-  phone: string;
-  riskLevel: string;
 }
 
 export interface Alert {
@@ -22,7 +17,6 @@ export interface Alert {
   customerId?: number | null;
   message: string;
   alertType: string;
-  severity: string;
   createdAt: string;
   isResolved: boolean;
 }

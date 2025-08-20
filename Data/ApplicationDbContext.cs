@@ -29,13 +29,9 @@ namespace bet_fred.Data
                 .WithMany(c => c.Alerts)
                 .HasForeignKey(a => a.CustomerId);
 
-            // Configure decimal precision
+            // Configure decimal precision for amounts
             modelBuilder.Entity<BetRecord>()
                 .Property(b => b.Amount)
-                .HasColumnType("decimal(18,2)");
-
-            modelBuilder.Entity<Customer>()
-                .Property(c => c.BetLimit)
                 .HasColumnType("decimal(18,2)");
         }
     }

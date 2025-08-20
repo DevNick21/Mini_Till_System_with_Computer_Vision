@@ -81,6 +81,8 @@ class ClassificationResponse(BaseModel):
 _model = None
 _device = None
 _transform = None
+_class_order = None  # Optional class order loaded from sidecar
+_id_to_writer_runtime = None  # Mapping resolved at runtime
 
 
 def initialize_model():
@@ -92,20 +94,54 @@ def initialize_model():
         _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {_device}")
 
-        # Check if the EfficientNet model is available
+    # Check if the EfficientNet model is available
         efficientnet_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
 
         # Load EfficientNet model
         if os.path.exists(efficientnet_path):
             try:
                 logger.info("EfficientNet model found, using as primary model")
-                _model = EfficientNetClassifier(num_writers=len(ALL_WRITERS))
+                # Try to load class order sidecar to size model appropriately
+                base_name, _ = os.path.splitext(BEST_MODEL_NAME)
+                sidecar_path = os.path.join(
+                    MODEL_SAVE_PATH, f"{base_name}.labels.json")
+                runtime_class_order = None
+                if os.path.exists(sidecar_path):
+                    try:
+                        import json
+                        with open(sidecar_path, "r", encoding="utf-8") as f:
+                            payload = json.load(f)
+                        if isinstance(payload, dict) and "all_writers" in payload and isinstance(payload["all_writers"], list):
+                            runtime_class_order = payload["all_writers"]
+                            logger.info(
+                                f"Loaded class order from sidecar: {sidecar_path}")
+                    except Exception as se:
+                        logger.warning(f"Failed to read labels sidecar: {se}")
+
+                # Size the classifier using sidecar if present
+                num_classes = len(
+                    runtime_class_order) if runtime_class_order else len(ALL_WRITERS)
+                _model = EfficientNetClassifier(num_writers=num_classes)
                 _model.load_state_dict(torch.load(
                     efficientnet_path, map_location=_device))
                 _model.to(_device)
                 _model.eval()
                 model_path = efficientnet_path
                 logger.info("EfficientNet model loaded successfully")
+
+                # Resolve class order/name mapping for runtime
+                global _class_order, _id_to_writer_runtime
+                if runtime_class_order:
+                    _class_order = runtime_class_order
+                    _id_to_writer_runtime = {
+                        idx: name for idx, name in enumerate(runtime_class_order)}
+                    # Sanity check vs config
+                    if len(runtime_class_order) != len(ALL_WRITERS) or any(a != b for a, b in zip(runtime_class_order, ALL_WRITERS)):
+                        logger.warning(
+                            "Class order sidecar differs from config ALL_WRITERS; using sidecar order for API name mapping.")
+                else:
+                    _class_order = list(ALL_WRITERS)
+                    _id_to_writer_runtime = dict(ID_TO_WRITER)
             except Exception as e:
                 logger.error(f"✗ Error loading EfficientNet model: {e}")
                 _model = None
@@ -127,8 +163,9 @@ def initialize_model():
         logger.info("Classification model initialized successfully")
         logger.info(f"   Model path: {model_path}")
         logger.info(f"   Image size: {IMAGE_SIZE}x{IMAGE_SIZE}")
+        num_writers = len(_class_order) if _class_order else len(ALL_WRITERS)
         logger.info(
-            f"   Writers: {len(ALL_WRITERS)} (IDs 1-{len(ALL_WRITERS)})")
+            f"   Writers: {num_writers} (IDs 1-{num_writers})")
 
     except Exception as e:
         logger.error(f"❌ Failed to initialize model: {e}")
@@ -158,7 +195,7 @@ async def health_check():
         "api": "BetFred Writer Classification",
         "model_loaded": _model is not None,
         "device": str(_device) if _device else "unknown",
-        "writers": len(ALL_WRITERS),
+        "writers": len(_class_order) if _class_order else len(ALL_WRITERS),
         "timestamp": datetime.utcnow().isoformat()
     }
 
@@ -218,7 +255,7 @@ async def classify_handwriting(file: UploadFile = File(...)):
             for rank in range(topk_idx.size(1)):
                 cls_idx = topk_idx[0, rank].item()
                 writer_one_based = cls_idx + 1
-                writer_name = ID_TO_WRITER.get(
+                writer_name = _id_to_writer_runtime.get(
                     cls_idx, f"id{writer_one_based}")
                 top_items.append(
                     f"{writer_name}({writer_one_based})={topk_conf[0, rank].item():.3f}")
@@ -230,7 +267,8 @@ async def classify_handwriting(file: UploadFile = File(...)):
         writer_id = predicted_id.item() + 1
         confidence_score = confidence.item()
 
-        writer_display = ID_TO_WRITER.get(writer_id - 1, f"Writer {writer_id}")
+        writer_display = _id_to_writer_runtime.get(
+            writer_id - 1, f"Writer {writer_id}")
         logger.info(
             f"Model prediction: writer_id={writer_id} ({writer_display}), confidence={confidence_score:.3f}")
 
@@ -258,7 +296,7 @@ async def get_model_info():
     if _model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    num_writers = len(ALL_WRITERS)
+    num_writers = len(_class_order) if _class_order else len(ALL_WRITERS)
     writer_ids = list(range(1, num_writers + 1))
     threshold = MEDIUM_CONFIDENCE_THRESHOLD
 
@@ -273,7 +311,7 @@ async def get_model_info():
         "num_writers": num_writers,
         "available_writers": writer_ids,
         "efficientnet_model": isinstance(_model, EfficientNetClassifier),
-        "writer_names": {str(i + 1): ID_TO_WRITER.get(i, f"Writer {i + 1}") for i in range(num_writers)},
+        "writer_names": {str(i + 1): _id_to_writer_runtime.get(i, f"Writer {i + 1}") for i in range(num_writers)},
         "input_size": IMAGE_SIZE,
         "device": str(_device),
         "confidence_thresholds": {

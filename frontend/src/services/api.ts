@@ -38,21 +38,7 @@ export const apiService = {
     return response.data;
   },
 
-  openClassificationUpdates(onMessage: (update: { betId: number; writerClassification: string; confidence: number }) => void): EventSource {
-    const es = new EventSource(`${API_URL}/bet/classification-updates`);
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        onMessage({ betId: data.betId, writerClassification: data.writerClassification, confidence: data.confidence });
-      } catch (err) {
-        console.error('Failed to parse classification update', err);
-      }
-    };
-    es.onerror = (e) => {
-      console.warn('Classification updates stream error', e);
-    };
-    return es;
-  },
+  // SSE removed; rely on polling for now
 
   // Customers
   async getCustomers(): Promise<Customer[]> {

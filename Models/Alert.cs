@@ -4,7 +4,6 @@ namespace bet_fred.Models
 {
     /// <summary>
     /// Alert entity for fraud detection notifications.
-    /// Generated when threshold rules are violated or suspicious patterns detected.
     /// </summary>
     public class Alert
     {
@@ -17,13 +16,6 @@ namespace bet_fred.Models
         [Required]
         [StringLength(500)]
         public string Message { get; set; } = string.Empty;
-
-        /// <summary>
-        /// Severity level: Low, Medium, High, Critical
-        /// </summary>
-        [Required]
-        [StringLength(20)]
-        public string Severity { get; set; } = "Low";
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

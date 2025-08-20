@@ -88,29 +88,17 @@ const AlertsComponent: React.FC = () => {
             <Alert variant="info">No alerts found</Alert>
           ) : (
             alerts.map(alert => (
-              <Alert 
-                key={alert.id} 
-                variant={
-                  alert.severity?.toLowerCase() === 'critical' ? 'danger' :
-                  alert.severity?.toLowerCase() === 'high' ? 'danger' :
-                  alert.severity?.toLowerCase() === 'medium' ? 'warning' :
-                  alert.severity?.toLowerCase() === 'low' ? 'info' : 'secondary'
-                }
-                className="mb-3"
-              >
+        <Alert key={alert.id} variant={alert.isResolved ? 'success' : 'warning'} className="mb-3">
                 <div className="d-flex justify-content-between align-items-center">
                   <div>
                     <h5>
                       {alert.message}
-                      <Badge 
-                        bg={alert.isResolved ? 'success' : 'secondary'}
-                        className="ms-2"
-                      >
+          <Badge bg={alert.isResolved ? 'success' : 'secondary'} className="ms-2">
                         {alert.isResolved ? 'Resolved' : 'Pending'}
                       </Badge>
                     </h5>
                     <div>
-                      <strong>CustomerId:</strong> {alert.customerId ?? 'N/A'}
+          <strong>CustomerId:</strong> {alert.customerId ?? 'N/A'}
                     </div>
                     <div>
                       <strong>Date:</strong> {new Date(alert.createdAt).toLocaleString()}

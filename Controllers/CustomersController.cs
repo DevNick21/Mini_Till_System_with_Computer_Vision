@@ -61,12 +61,7 @@ namespace bet_fred.Controllers
             {
                 var customer = new Customer
                 {
-                    Name = createDto.Name,
-                    Email = createDto.Email,
-                    Phone = createDto.Phone,
-                    Address = createDto.Address,
-                    BetLimit = createDto.BetLimit,
-                    CreatedAt = DateTime.UtcNow
+                    Name = createDto.Name
                 };
 
                 var created = await _dataService.CreateCustomerAsync(customer);
@@ -92,11 +87,6 @@ namespace bet_fred.Controllers
 
                 // Update only the properties that are provided
                 if (updateDto.Name != null) existing.Name = updateDto.Name;
-                if (updateDto.Email != null) existing.Email = updateDto.Email;
-                if (updateDto.Phone != null) existing.Phone = updateDto.Phone;
-                if (updateDto.Address != null) existing.Address = updateDto.Address;
-                if (updateDto.BetLimit.HasValue) existing.BetLimit = updateDto.BetLimit.Value;
-                if (updateDto.RiskLevel != null) existing.RiskLevel = updateDto.RiskLevel;
 
                 var updated = await _dataService.UpdateCustomerAsync(id, existing);
 
@@ -139,14 +129,7 @@ namespace bet_fred.Controllers
             return new CustomerDto
             {
                 Id = customer.Id,
-                Name = customer.Name,
-                Email = customer.Email,
-                Phone = customer.Phone,
-                Address = customer.Address,
-                BetLimit = customer.BetLimit,
-                RiskLevel = customer.RiskLevel,
-                TotalBets = customer.TotalBets,
-                TotalStake = customer.TotalStake
+                Name = customer.Name
             };
         }
     }

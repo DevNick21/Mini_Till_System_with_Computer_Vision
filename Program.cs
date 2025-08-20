@@ -32,11 +32,7 @@ namespace bet_fred
 
             // ThresholdHostedService disabled for MVP
 
-            // Add default configuration for Classification API if not present
-            if (!builder.Configuration.GetSection("ClassificationApi").Exists())
-            {
-                builder.Configuration["ClassificationApi:BaseUrl"] = "http://localhost:8001";
-            }
+            // Classification API base URL defaults in service when not configured
 
             // Add API controllers
             builder.Services.AddControllers();
@@ -79,15 +75,6 @@ namespace bet_fred
             app.UseStaticFiles();
             app.UseRouting();
             // Apply CORS after routing and before endpoints per ASP.NET Core guidance
-            app.Use(async (context, next) =>
-            {
-                var origin = context.Request.Headers["Origin"].FirstOrDefault();
-                if (!string.IsNullOrEmpty(origin))
-                {
-                    Console.WriteLine($"Incoming Origin: {origin}");
-                }
-                await next();
-            });
             app.UseCors("ReactAppPolicy");
 
             // Apply pending migrations

@@ -50,8 +50,7 @@ namespace bet_fred.Controllers
         {
             try
             {
-                var bets = await _dataService.GetBetRecordsAsync();
-                var bet = bets.FirstOrDefault(b => b.Id == id);
+                var bet = await _dataService.GetBetByIdAsync(id);
 
                 if (bet == null)
                     return NotFound();
@@ -70,18 +69,26 @@ namespace bet_fred.Controllers
         {
             try
             {
+                if (string.IsNullOrWhiteSpace(createDto.ImageDataBase64))
+                    return BadRequest("Slip image is required");
+
+                byte[] imageBytes;
+                try
+                {
+                    imageBytes = Convert.FromBase64String(createDto.ImageDataBase64);
+                }
+                catch
+                {
+                    return BadRequest("Invalid base64 slip image");
+                }
+
                 var betRecord = new BetRecord
                 {
                     Amount = createDto.Amount,
                     CustomerId = createDto.CustomerId,
-                    PlacedAt = DateTime.UtcNow
+                    PlacedAt = DateTime.UtcNow,
+                    ImageData = imageBytes
                 };
-
-                // Handle image data if provided
-                if (!string.IsNullOrEmpty(createDto.ImageDataBase64))
-                {
-                    betRecord.ImageData = Convert.FromBase64String(createDto.ImageDataBase64);
-                }
 
                 var created = await _dataService.CreateBetRecordAsync(betRecord);
                 return CreatedAtAction(nameof(GetBet), new { id = created.Id }, MapToBetRecordDto(created));
@@ -101,7 +108,7 @@ namespace bet_fred.Controllers
 
             try
             {
-                // First create a new bet record (do not store image in DB for MVP)
+                // First create a new bet record and store the image
                 var newBet = new BetRecord
                 {
                     Amount = amount ?? 0, // Amount provided at upload time (stake)
@@ -113,6 +120,13 @@ namespace bet_fred.Controllers
                 using var memoryStream = new MemoryStream();
                 await file.CopyToAsync(memoryStream);
                 var imageData = memoryStream.ToArray();
+
+                // Persist the slip image to the bet record
+                var stored = await _dataService.UploadSlipAsync(createdBet.Id, imageData);
+                if (!stored)
+                {
+                    _logger.LogWarning("Failed to store slip image for bet {BetId}", createdBet.Id);
+                }
 
                 // Synchronous classification for MVP
                 if (await _classificationService.IsServiceHealthyAsync())
@@ -144,8 +158,7 @@ namespace bet_fred.Controllers
             try
             {
                 // Get existing bet
-                var bets = await _dataService.GetBetRecordsAsync();
-                var existingBet = bets.FirstOrDefault(b => b.Id == id);
+                var existingBet = await _dataService.GetBetByIdAsync(id);
 
                 if (existingBet == null)
                     return NotFound();
@@ -156,11 +169,7 @@ namespace bet_fred.Controllers
 
                 // BetType removed
 
-                if (updateDto.Outcome != null)
-                {
-                    if (Enum.TryParse<BetRecord.BetOutcome>(updateDto.Outcome, true, out var outcome))
-                        existingBet.Outcome = outcome;
-                }
+                // Outcome removed
 
                 if (updateDto.CustomerId.HasValue)
                     existingBet.CustomerId = updateDto.CustomerId;
@@ -203,9 +212,7 @@ namespace bet_fred.Controllers
                 await file.CopyToAsync(memoryStream);
                 var imageData = memoryStream.ToArray();
 
-                var success = await _dataService.UploadSlipAsync(id, imageData);
-
-                if (!success)
+                if (!await _dataService.UploadSlipAsync(id, imageData))
                     return BadRequest("Failed to upload slip - bet may not exist or already has image");
 
                 // Check if CV service is healthy before classification
@@ -220,8 +227,7 @@ namespace bet_fred.Controllers
                         await _dataService.UpdateBetClassificationAsync(id, writerId, confidence.Value);
 
                         // Get the updated bet record for threshold evaluation
-                        var bets = await _dataService.GetBetRecordsAsync();
-                        var bet = bets.FirstOrDefault(b => b.Id == id);
+                        var bet = await _dataService.GetBetByIdAsync(id);
                         if (bet != null && bet.CustomerId.HasValue)
                         {
                             // Evaluate thresholds after classification
@@ -241,8 +247,7 @@ namespace bet_fred.Controllers
                 }
 
                 // If we haven't returned yet, get the bet and return it
-                var allBets = await _dataService.GetBetRecordsAsync();
-                var currentBet = allBets.FirstOrDefault(b => b.Id == id);
+                var currentBet = await _dataService.GetBetByIdAsync(id);
                 if (currentBet != null)
                 {
                     return Ok(MapToBetRecordDto(currentBet));
@@ -322,11 +327,10 @@ namespace bet_fred.Controllers
                 Id = betRecord.Id,
                 Amount = betRecord.Amount,
                 PlacedAt = betRecord.PlacedAt,
-                Outcome = betRecord.Outcome.ToString(),
                 WriterClassification = betRecord.WriterClassification,
                 ClassificationConfidence = betRecord.ClassificationConfidence,
                 CustomerId = betRecord.CustomerId,
-                CustomerName = betRecord.Customer?.Name
+                // CustomerName removed from DTO
             };
         }
 
@@ -335,8 +339,7 @@ namespace bet_fred.Controllers
         {
             try
             {
-                var bets = await _dataService.GetBetRecordsAsync();
-                var bet = bets.FirstOrDefault(b => b.Id == id);
+                var bet = await _dataService.GetBetByIdAsync(id);
                 if (bet == null) return NotFound();
                 return Ok(new { bet.Id, bet.WriterClassification, bet.ClassificationConfidence });
             }
@@ -347,20 +350,6 @@ namespace bet_fred.Controllers
             }
         }
 
-        // DEV ONLY: clear all bets
-        [HttpPost("clear")]
-        public async Task<ActionResult> ClearAllBets()
-        {
-            try
-            {
-                await _dataService.ClearAllBetsAsync();
-                return Ok(new { message = "All bets cleared" });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error clearing all bets");
-                return StatusCode(500, "Error clearing bets");
-            }
-        }
+        // DEV endpoint 'clear' removed to reduce surface area
     }
 }

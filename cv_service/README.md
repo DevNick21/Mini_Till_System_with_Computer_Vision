@@ -1,4 +1,31 @@
-# BetFred Handwriting Classification Service
+# BetFred CV Service — EfficientNet Classification
+
+Key endpoints
+
+- GET /health
+- GET /model-info
+- POST /classify-anonymous (multipart field: file)
+
+Scripts
+
+- Deidentify dataset:
+
+  python -m cv_service.scripts.deidentify_slips --src-dir cv_service/slips --out-dir cv_service/slips_anon --mapping-file cv_service/slips_deid_mapping.csv
+
+- Stratified split:
+
+  python -m cv_service.scripts.split_dataset --data-dir cv_service/slips_anon --out-dir cv_service/dataset_splits --train 0.7 --val 0.2 --test 0.1 --seed 42
+
+Training
+
+- Entry: python -m cv_service.src.training.train_model
+- Best model saved to cv_service/trained_models/best_efficientnet_classifier.pth
+- Labels sidecar: cv_service/trained_models/best_efficientnet_classifier.labels.json
+
+Serving
+
+- Start API: python cv_service/run_api.py
+- Base URL: <http://localhost:8001/>
 
 A machine learning service to classify handwritten bet slips for safer gambling monitoring.
 
@@ -60,30 +87,24 @@ python run_api.py
 
 The API will be available at `http://localhost:8001`.
 
-### API Endpoints
+## Key endpoints
 
 - **POST /classify-anonymous**: Classify a single handwritten bet slip
 - **GET /health**: Check API health status
 - **GET /model-info**: Get model information
 
-### Python Client Example
+## Scripts
 
 ```python
-import requests
-import json
+import requests, json
 
 url = "http://localhost:8001/classify-anonymous"
 files = {"file": ("123.jpg", open("path/to/slip.jpg", "rb"))}
-
 response = requests.post(url, files=files)
-result = response.json()
-
-print(json.dumps(result, indent=2))
+print(json.dumps(response.json(), indent=2))
 ```
 
-## Additional Tools
-
-This service includes an optional diagnostic:
+Additional Tools
 
 - **api_diagnostics.py**: Check system status and model availability
 

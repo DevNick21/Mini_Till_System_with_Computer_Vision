@@ -97,21 +97,20 @@ namespace bet_fred.Services
                     return generatedAlerts;
                 }
 
-                // Get existing alerts to avoid duplicates
-                var existingAlerts = await _context.Alerts
-                    .Where(a => a.CustomerId == customerId && !a.IsResolved)
-                    .ToListAsync();
-
-                // Process each rule
                 foreach (var rule in activeRules)
                 {
-                    // Skip if we already have an active alert for this rule type
-                    if (existingAlerts.Any(a => a.AlertType == $"Threshold_{rule.RuleType}"))
-                        continue;
-
-                    var alert = await EvaluateRuleForCustomerAsync(rule, customer);
-                    if (alert != null)
+                    var timeWindow = DateTime.UtcNow.AddMinutes(-rule.TimeWindowMinutes);
+                    var totalStake = customer.BetRecords.Where(b => b.PlacedAt >= timeWindow).Sum(b => b.Amount);
+                    if (totalStake > rule.Value)
                     {
+                        var alert = new Alert
+                        {
+                            AlertType = "ThresholdExceeded",
+                            Message = $"Customer '{customer.Name}' exceeded {rule.Name}: {totalStake:C} > {rule.Value:C} in {rule.TimeWindowMinutes}m",
+                            CustomerId = customer.Id,
+                            CreatedAt = DateTime.UtcNow,
+                            IsResolved = false
+                        };
                         generatedAlerts.Add(alert);
                         _context.Alerts.Add(alert);
                         await _context.SaveChangesAsync();
@@ -156,88 +155,6 @@ namespace bet_fred.Services
         /// <summary>
         /// Evaluates a specific rule for a customer
         /// </summary>
-        private Task<Alert?> EvaluateRuleForCustomerAsync(ThresholdRule rule, Customer customer)
-        {
-            var timeWindow = DateTime.UtcNow.AddMinutes(-rule.TimeWindowMinutes);
-            var customerBets = customer.BetRecords.Where(b => b.PlacedAt >= timeWindow).ToList();
-
-            if (!customerBets.Any())
-                return Task.FromResult<Alert?>(null);
-
-            switch (rule.RuleType)
-            {
-                case "DailyStake":
-                    {
-                        var totalStake = customerBets.Sum(b => b.Amount);
-                        if (totalStake > rule.Value)
-                        {
-                            return Task.FromResult<Alert?>(CreateThresholdAlert(rule, customer, totalStake));
-                        }
-                        break;
-                    }
-                case "DailyBetCount":
-                    {
-                        var betCount = customerBets.Count;
-                        if (betCount > rule.Value)
-                        {
-                            return Task.FromResult<Alert?>(CreateThresholdAlert(rule, customer, betCount));
-                        }
-                        break;
-                    }
-                case "DailyLoss":
-                    {
-                        var totalLoss = customerBets.Where(b => b.Outcome == BetRecord.BetOutcome.Loss)
-                            .Sum(b => b.Amount);
-                        if (totalLoss > rule.Value)
-                        {
-                            return Task.FromResult<Alert?>(CreateThresholdAlert(rule, customer, totalLoss));
-                        }
-                        break;
-                    }
-                default:
-                    _logger.LogWarning("Unknown rule type: {RuleType}", rule.RuleType);
-                    break;
-            }
-
-            return Task.FromResult<Alert?>(null);
-        }
-
-        /// <summary>
-        /// Creates an alert for a threshold violation
-        /// </summary>
-        private Alert CreateThresholdAlert(ThresholdRule rule, Customer customer, decimal currentValue)
-        {
-            string message = $"Customer '{customer.Name}' exceeded {rule.Name} threshold. " +
-                             $"Current value: {currentValue:C}, Threshold: {rule.Value:C}";
-
-            return new Alert
-            {
-                AlertType = $"Threshold_{rule.RuleType}",
-                Message = message,
-                Severity = "Medium", // Default severity
-                CustomerId = customer.Id,
-                CreatedAt = DateTime.UtcNow,
-                IsResolved = false
-            };
-        }
-
-        /// <summary>
-        /// Creates an alert for a threshold violation with integer value
-        /// </summary>
-        private Alert CreateThresholdAlert(ThresholdRule rule, Customer customer, int currentValue)
-        {
-            string message = $"Customer '{customer.Name}' exceeded {rule.Name} threshold. " +
-                             $"Current value: {currentValue}, Threshold: {(int)rule.Value}";
-
-            return new Alert
-            {
-                AlertType = $"Threshold_{rule.RuleType}",
-                Message = message,
-                Severity = "Medium", // Default severity
-                CustomerId = customer.Id,
-                CreatedAt = DateTime.UtcNow,
-                IsResolved = false
-            };
-        }
+    // Removed RuleType-specific evaluation and severity. All rules: total stake in window > value.
     }
 }

@@ -15,10 +15,6 @@ namespace bet_fred.DTOs
 
         public DateTime PlacedAt { get; set; }
 
-        // BetType removed for demo simplification
-
-        public string Outcome { get; set; } = "Unknown";
-
         /// <summary>
         /// Writer classification result from ML processing
         /// </summary>
@@ -31,7 +27,6 @@ namespace bet_fred.DTOs
 
         // Associated customer information (if available)
         public int? CustomerId { get; set; }
-        public string? CustomerName { get; set; }
     }
 
     /// <summary>
@@ -45,8 +40,9 @@ namespace bet_fred.DTOs
 
         public int? CustomerId { get; set; }
 
-        // Base64 encoded image data for handwriting analysis
-        public string? ImageDataBase64 { get; set; }
+        // Base64 encoded image data for handwriting analysis (required)
+        [Required]
+        public string ImageDataBase64 { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -55,8 +51,6 @@ namespace bet_fred.DTOs
     public class UpdateBetRecordDto
     {
         public decimal? Amount { get; set; }
-
-        public string? Outcome { get; set; }
 
         public int? CustomerId { get; set; }
 
@@ -70,12 +64,6 @@ namespace bet_fred.DTOs
     /// </summary>
     public class UploadBetSlipDto
     {
-        // Base64 encoded image data for handwriting analysis
-        [Required]
-        public string ImageDataBase64 { get; set; } = string.Empty;
-
-        public decimal Amount { get; set; }
-
-        public int? CustomerId { get; set; }
+        // Removed; creation requires image via CreateBetRecordDto
     }
 }

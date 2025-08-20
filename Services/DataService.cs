@@ -13,6 +13,7 @@ namespace bet_fred.Services
 
         // BET RECORD OPERATIONS
         Task<IEnumerable<BetRecord>> GetBetRecordsAsync();
+        Task<BetRecord?> GetBetByIdAsync(int id);
         Task<BetRecord> CreateBetRecordAsync(BetRecord betRecord);
         Task<bool> UploadSlipAsync(int betId, byte[] imageData);
         Task<byte[]?> GetSlipImageAsync(int betId);
@@ -30,9 +31,6 @@ namespace bet_fred.Services
         // DASHBOARD OPERATIONS
         Task<object> GetDashboardStatsAsync();
         Task<IEnumerable<Alert>> GetAlertsAsync();
-
-        // DEV UTILITIES
-        Task ClearAllBetsAsync();
     }
 
     public class DataService : IDataService
@@ -64,7 +62,6 @@ namespace bet_fred.Services
                 {
                     Amount = random.Next(50, 1000),
                     PlacedAt = DateTime.Today.AddHours(random.Next(8, 20)),
-                    Outcome = BetRecord.BetOutcome.Unknown,
                     ImageData = imageData
                 };
 
@@ -118,6 +115,13 @@ namespace bet_fred.Services
         public async Task<IEnumerable<BetRecord>> GetBetRecordsAsync()
         {
             return await _context.BetRecords.Include(b => b.Customer).ToListAsync();
+        }
+
+        public async Task<BetRecord?> GetBetByIdAsync(int id)
+        {
+            return await _context.BetRecords
+                .Include(b => b.Customer)
+                .FirstOrDefaultAsync(b => b.Id == id);
         }
 
         public async Task<BetRecord> CreateBetRecordAsync(BetRecord betRecord)
@@ -207,11 +211,6 @@ namespace bet_fred.Services
             if (existing == null) return null;
 
             existing.Name = customer.Name;
-            existing.Email = customer.Email;
-            existing.Phone = customer.Phone;
-            existing.Address = customer.Address;
-            existing.BetLimit = customer.BetLimit;
-            existing.RiskLevel = customer.RiskLevel;
 
             await _context.SaveChangesAsync();
             return existing;
@@ -259,7 +258,6 @@ namespace bet_fred.Services
                 // Update properties
                 existingBet.Amount = betRecord.Amount;
                 existingBet.CustomerId = betRecord.CustomerId;
-                existingBet.Outcome = betRecord.Outcome;
 
                 // The following fields should not be updated here
                 // - ImageData (use UploadSlipAsync)
@@ -279,11 +277,6 @@ namespace bet_fred.Services
             }
         }
 
-        public async Task ClearAllBetsAsync()
-        {
-            // Remove all bet records quickly
-            _context.BetRecords.RemoveRange(_context.BetRecords);
-            await _context.SaveChangesAsync();
-        }
+        // Removed dev-only ClearAllBetsAsync to reduce surface area
     }
 }

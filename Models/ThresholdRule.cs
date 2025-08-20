@@ -24,7 +24,7 @@ namespace bet_fred.Models
         /// <summary>
         /// Time window in minutes for the rule evaluation
         /// </summary>
-        public int TimeWindowMinutes { get; set; } = 1440; // 24 hours default
+        public int TimeWindowMinutes { get; set; } = 1440;
 
         /// <summary>
         /// Whether this rule is currently active
@@ -36,7 +36,7 @@ namespace bet_fred.Models
         /// <summary>
         /// Type of threshold rule (DailyStake, DailyLoss, DailyBetCount, etc.)
         /// </summary>
-        [StringLength(50)]
-        public string RuleType { get; set; } = string.Empty;
+        // [StringLength(50)]
+        // public string RuleType { get; set; } = string.Empty;
     }
 }

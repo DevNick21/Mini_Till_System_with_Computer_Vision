@@ -24,10 +24,7 @@ const UploadComponent: React.FC = () => {
 
   useEffect(() => {
     loadRecentBets();
-    const es = apiService.openClassificationUpdates(update => {
-      setRecentBets(prev => prev.map(b => b.id === update.betId ? { ...b, writerClassification: update.writerClassification, classificationConfidence: update.confidence } : b));
-    });
-    return () => { es.close(); };
+  // SSE removed; rely on refresh after upload and manual refresh
   }, []);
 
   const lastFetchRef = useRef<number>(0);
@@ -290,7 +287,7 @@ const UploadComponent: React.FC = () => {
                             : 'Not classified'}
                         </span>
                       </p>
-                      <small>Customer: {bet.customerName || 'Unknown'}</small>
+                      <small>CustomerId: {bet.customerId ?? 'Unknown'}</small>
                     </div>
                   ))}
                 </div>
