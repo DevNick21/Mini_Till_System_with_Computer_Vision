@@ -1,3 +1,3 @@
 """
-BetFred CV Service Training Module
+CV Service Training Module
 """

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Form, Button, Card, Alert, Spinner, Toast, ToastContainer, Collapse, ProgressBar } from 'react-bootstrap';
-import { apiService } from '../../services/api';
+import { apiService, ocrService } from '../../services/api';
 import { BetRecord } from '../../types';
 
 const UploadComponent: React.FC = () => {
@@ -12,6 +12,8 @@ const UploadComponent: React.FC = () => {
   const [betData, setBetData] = useState<Partial<BetRecord>>({
     amount: 0
   });
+  const [suggestionMethod, setSuggestionMethod] = useState<string | null>(null);
+  const [suggestionId, setSuggestionId] = useState<number | null>(null);
   const [recentBets, setRecentBets] = useState<BetRecord[]>([]);
   const [loadingRecent, setLoadingRecent] = useState(false);
   interface ToastItem { id: number; message: string; variant: 'success' | 'danger' | 'info' | 'info-progress'; retry?: () => void; progress?: number; inProgress?: boolean; }
@@ -59,6 +61,39 @@ const UploadComponent: React.FC = () => {
         }
       };
       reader.readAsDataURL(selectedFile);
+      // Fire-and-forget: get suggested stake from OCR service
+      (async () => {
+        try {
+          const res = await ocrService.suggestStake(selectedFile);
+          if (res && typeof res.stake === 'number') {
+            setSuggestionMethod(res.method || null);
+            // Prefill but let user override
+            setBetData(prev => ({ ...prev, amount: Number(res.stake) }));
+            pushToast({ message: `Suggested stake: ${res.stake.toFixed(2)}${res.currency ? ' ' + res.currency : ''}`, variant: 'info' });
+            // Log suggestion for audit
+            try {
+              const logged = await ocrService.logSuggestion({
+                fileName: selectedFile.name,
+                fileSize: selectedFile.size,
+                stake: Number(res.stake),
+                currency: res.currency || null,
+                method: res.method || null
+              });
+              if (logged?.id) setSuggestionId(logged.id);
+            } catch (e) {
+              console.warn('Failed to log OCR suggestion', e);
+            }
+          } else {
+            setSuggestionMethod(null);
+            setSuggestionId(null);
+          }
+        } catch (err) {
+          // non-fatal; user can type manually
+          setSuggestionMethod(null);
+          setSuggestionId(null);
+          console.warn('OCR suggestion failed:', err);
+        }
+      })();
   // removed uploadSuccess state
     }
   };
@@ -76,6 +111,35 @@ const UploadComponent: React.FC = () => {
         }
       };
       reader.readAsDataURL(droppedFile);
+      (async () => {
+        try {
+          const res = await ocrService.suggestStake(droppedFile);
+          if (res && typeof res.stake === 'number') {
+            setSuggestionMethod(res.method || null);
+            setBetData(prev => ({ ...prev, amount: Number(res.stake) }));
+            pushToast({ message: `Suggested stake: ${res.stake.toFixed(2)}${res.currency ? ' ' + res.currency : ''}`, variant: 'info' });
+            try {
+              const logged = await ocrService.logSuggestion({
+                fileName: droppedFile.name,
+                fileSize: droppedFile.size,
+                stake: Number(res.stake),
+                currency: res.currency || null,
+                method: res.method || null
+              });
+              if (logged?.id) setSuggestionId(logged.id);
+            } catch (e) {
+              console.warn('Failed to log OCR suggestion', e);
+            }
+          } else {
+            setSuggestionMethod(null);
+            setSuggestionId(null);
+          }
+        } catch (err) {
+          setSuggestionMethod(null);
+          setSuggestionId(null);
+          console.warn('OCR suggestion failed:', err);
+        }
+      })();
   // removed uploadSuccess state
     }
   };
@@ -90,6 +154,11 @@ const UploadComponent: React.FC = () => {
       ...prev,
       [name]: name === 'amount' ? parseFloat(value) : value
     }));
+    if (name === 'amount') {
+      // User typing overrides the suggestion
+      setSuggestionMethod(null);
+  setSuggestionId(null);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -163,6 +232,8 @@ const UploadComponent: React.FC = () => {
     setPreview(null);
     setError(null);
   setBetData({ amount: 0 });
+  setSuggestionMethod(null);
+  setSuggestionId(null);
   };
 
   return (
@@ -234,11 +305,29 @@ const UploadComponent: React.FC = () => {
                       name="amount"
                       value={betData.amount}
                       onChange={handleInputChange}
+                      onKeyDown={(ev: React.KeyboardEvent<HTMLInputElement>) => {
+                        if (ev.key === 'Enter') {
+                          // Accept current value and submit
+                          const form = ev.currentTarget.form;
+                          if (form) {
+                            ev.preventDefault();
+                            // If a suggestion exists, mark it accepted
+                            if (suggestionId) {
+                              ocrService.acceptSuggestion(suggestionId).catch(() => {/* no-op */});
+                              setSuggestionId(null);
+                            }
+                            form.requestSubmit();
+                          }
+                        }
+                      }}
                       step="0.01"
                       min="0"
                       inputMode="decimal"
                       required
                     />
+                    {suggestionMethod && (
+                      <div className="form-text">Suggested via {suggestionMethod}. Press Enter to accept and submit, or type to overwrite.</div>
+                    )}
                   </Form.Group>
 
                   {/* Date is managed by backend (PlacedAt) and shown in recent list */}

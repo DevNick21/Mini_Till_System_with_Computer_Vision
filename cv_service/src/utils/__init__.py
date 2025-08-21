@@ -1,5 +1,5 @@
 """
-BetFred CV Service Utils Module
+CV Service Utils Module
 Provides utility functions and configuration for the CV service
 """
 from .config import *

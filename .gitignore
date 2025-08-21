@@ -22,8 +22,7 @@
 # if you have a named file:
 # /DefaultConnection.db
 
-# — Raw slip images (if you stage a local folder) —
-cv_service/slips/
+# — Raw slip pdfs —
 /slips_pdf/
 
 # — Secret configs & envs —

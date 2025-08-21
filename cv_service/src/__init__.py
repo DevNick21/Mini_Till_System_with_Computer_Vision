@@ -1,3 +1,3 @@
 """
-BetFred CV Service Core Module
+CV Service Core Module
 """

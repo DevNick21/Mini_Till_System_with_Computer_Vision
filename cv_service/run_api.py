@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 """
-Launch script for the BetFred Classification API
+Launch script for the Classification API
 """
-import os
-import sys
 import uvicorn
 from pathlib import Path
 
@@ -11,9 +9,7 @@ from pathlib import Path
 current_dir = Path(__file__).parent
 
 if __name__ == "__main__":
-    print("\n=== BetFred Handwriting Classification System ===")
-    print("=== EfficientNet API Server                 ===")
-    print("=== Version 2.1 - July 2025                 ===\n")
+    print("\n=== Handwriting Classification System | API Server ===")
 
     # Configuration for the API server
     config = {
@@ -25,7 +21,7 @@ if __name__ == "__main__":
         "use_colors": False
     }
 
-    print("Starting BetFred Classification API server...")
+    print("Starting Classification API server...")
     print(f"   URL: http://localhost:{config['port']}")
     print(f"   Health check: http://localhost:{config['port']}/health")
     print(f"   API docs: http://localhost:{config['port']}/docs\n")

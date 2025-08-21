@@ -7,11 +7,8 @@ from pathlib import Path
 # Define the base directory
 CURRENT_DIR = Path(__file__).parent.parent.parent
 
-# All 13 writers from your dataset
-ALL_WRITERS = [
-    'ange', 'fola', 'gina', 'ibra', 'mae', 'mayo', 'nick',
-    'odosa', 'sam', 'scott', 'sipo', 'som', 'steve'
-]
+# All 12 writers
+ALL_WRITERS = ["anon"+str(i + 1) for i in range(12)]
 
 # Create mapping between writer names and numeric IDs
 WRITER_TO_ID = {writer: idx for idx, writer in enumerate(ALL_WRITERS)}
@@ -46,4 +43,4 @@ print(f"  Slips directory: {SLIPS_DIR}")
 
 # Inference preprocessing toggles
 # Keep this aligned with training transforms to avoid distribution shift
-PREPROCESS_CLAHE = False  # If True, apply CLAHE during inference
+PREPROCESS_CLAHE = True  # If True, apply CLAHE consistently

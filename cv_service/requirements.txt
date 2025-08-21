@@ -1,5 +1,5 @@
 # requirements.txt for cv_service (Python 3.11)
-# Updated: July 28, 2025
+# Updated: August 21, 2025
 
 # FastAPI web framework and dependencies
 fastapi==0.103.0

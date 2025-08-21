@@ -13,6 +13,7 @@ namespace bet_fred.Data
         public DbSet<BetRecord> BetRecords { get; set; }
         public DbSet<Alert> Alerts { get; set; }
         public DbSet<ThresholdRule> ThresholdRules { get; set; }
+        public DbSet<OcrSuggestion> OcrSuggestions { get; set; }
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -32,6 +33,10 @@ namespace bet_fred.Data
             // Configure decimal precision for amounts
             modelBuilder.Entity<BetRecord>()
                 .Property(b => b.Amount)
+                .HasColumnType("decimal(18,2)");
+
+            modelBuilder.Entity<OcrSuggestion>()
+                .Property(s => s.Stake)
                 .HasColumnType("decimal(18,2)");
         }
     }

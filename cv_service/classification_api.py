@@ -1,6 +1,9 @@
 """
-Classification API for BetFred Writer Identification System
-Provides REST endpoints for handwriting classification with confidence scoring
+BetFred Writer Classification API (EfficientNet)
+
+Provides REST endpoints for handwriting classification with confidence scoring.
+Initializes a trained EfficientNet model, applies optional CLAHE preprocessing,
+and serves predictions with confidence levels.
 """
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from typing import List, Dict, Any
@@ -15,10 +18,11 @@ import os
 import sys
 from pathlib import Path
 
-# Add the src directory to Python path
+# Ensure the 'src' package (under this folder) is importable
 current_dir = Path(__file__).parent
-src_dir = current_dir / "src"
-sys.path.append(str(src_dir))
+if (current_dir / "src").exists():
+    # Add the folder that contains the 'src' package to sys.path
+    sys.path.insert(0, str(current_dir))
 
 # Import models and config
 try:
@@ -34,7 +38,7 @@ try:
         BEST_MODEL_NAME,
     )
 except ImportError as e:
-    print(f"❌ Import error: {e}")
+    print(f"Import error: {e}")
     print("Please ensure your model and config files are in the correct location")
     sys.exit(1)
 
@@ -86,72 +90,58 @@ _id_to_writer_runtime = None  # Mapping resolved at runtime
 
 
 def initialize_model():
-    """Initialize the trained handwriting classification model (EfficientNet)"""
-    global _model, _device, _transform
+    """Initialize the EfficientNet model, class order mapping, and transforms."""
+    global _model, _device, _transform, _class_order, _id_to_writer_runtime
 
     try:
-        # Determine device
+        # Device
         _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(f"Using device: {_device}")
 
-    # Check if the EfficientNet model is available
+        # Model weights
         efficientnet_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
-
-        # Load EfficientNet model
-        if os.path.exists(efficientnet_path):
-            try:
-                logger.info("EfficientNet model found, using as primary model")
-                # Try to load class order sidecar to size model appropriately
-                base_name, _ = os.path.splitext(BEST_MODEL_NAME)
-                sidecar_path = os.path.join(
-                    MODEL_SAVE_PATH, f"{base_name}.labels.json")
-                runtime_class_order = None
-                if os.path.exists(sidecar_path):
-                    try:
-                        import json
-                        with open(sidecar_path, "r", encoding="utf-8") as f:
-                            payload = json.load(f)
-                        if isinstance(payload, dict) and "all_writers" in payload and isinstance(payload["all_writers"], list):
-                            runtime_class_order = payload["all_writers"]
-                            logger.info(
-                                f"Loaded class order from sidecar: {sidecar_path}")
-                    except Exception as se:
-                        logger.warning(f"Failed to read labels sidecar: {se}")
-
-                # Size the classifier using sidecar if present
-                num_classes = len(
-                    runtime_class_order) if runtime_class_order else len(ALL_WRITERS)
-                _model = EfficientNetClassifier(num_writers=num_classes)
-                _model.load_state_dict(torch.load(
-                    efficientnet_path, map_location=_device))
-                _model.to(_device)
-                _model.eval()
-                model_path = efficientnet_path
-                logger.info("EfficientNet model loaded successfully")
-
-                # Resolve class order/name mapping for runtime
-                global _class_order, _id_to_writer_runtime
-                if runtime_class_order:
-                    _class_order = runtime_class_order
-                    _id_to_writer_runtime = {
-                        idx: name for idx, name in enumerate(runtime_class_order)}
-                    # Sanity check vs config
-                    if len(runtime_class_order) != len(ALL_WRITERS) or any(a != b for a, b in zip(runtime_class_order, ALL_WRITERS)):
-                        logger.warning(
-                            "Class order sidecar differs from config ALL_WRITERS; using sidecar order for API name mapping.")
-                else:
-                    _class_order = list(ALL_WRITERS)
-                    _id_to_writer_runtime = dict(ID_TO_WRITER)
-            except Exception as e:
-                logger.error(f"✗ Error loading EfficientNet model: {e}")
-                _model = None
-        else:
+        if not os.path.exists(efficientnet_path):
             raise FileNotFoundError(
                 f"EfficientNet model not found in {MODEL_SAVE_PATH}")
 
-            # This section has been moved up above
+        # Class order sidecar (optional)
+        base_name, _ = os.path.splitext(BEST_MODEL_NAME)
+        sidecar_path = os.path.join(
+            MODEL_SAVE_PATH, f"{base_name}.labels.json")
+        runtime_class_order = None
+        if os.path.exists(sidecar_path):
+            try:
+                import json
+                with open(sidecar_path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                if isinstance(payload, dict) and isinstance(payload.get("all_writers"), list):
+                    runtime_class_order = payload["all_writers"]
+                    logger.info(f"Labels sidecar loaded: {sidecar_path}")
+            except Exception as se:
+                logger.warning(f"Failed to read labels sidecar: {se}")
 
-        # Create image transformation pipeline
+        # Build and load model
+        num_classes = len(
+            runtime_class_order) if runtime_class_order else len(ALL_WRITERS)
+        _model = EfficientNetClassifier(num_writers=num_classes)
+        _model.load_state_dict(torch.load(
+            efficientnet_path, map_location=_device))
+        _model.to(_device)
+        _model.eval()
+
+        # Resolve class order mapping
+        if runtime_class_order:
+            _class_order = runtime_class_order
+            _id_to_writer_runtime = {idx: name for idx,
+                                     name in enumerate(runtime_class_order)}
+            if len(runtime_class_order) != len(ALL_WRITERS) or any(a != b for a, b in zip(runtime_class_order, ALL_WRITERS)):
+                logger.warning(
+                    "Class order from sidecar differs from config; using sidecar for mapping.")
+        else:
+            _class_order = list(ALL_WRITERS)
+            _id_to_writer_runtime = dict(ID_TO_WRITER)
+
+        # Transforms (must match training/inference)
         _transform = T.Compose([
             T.ToPILImage(),
             T.Resize((IMAGE_SIZE, IMAGE_SIZE)),
@@ -160,15 +150,17 @@ def initialize_model():
             T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
 
-        logger.info("Classification model initialized successfully")
-        logger.info(f"   Model path: {model_path}")
+        # Startup summary
+        logger.info("Classification model initialized")
+        logger.info(f"   Model path: {efficientnet_path}")
         logger.info(f"   Image size: {IMAGE_SIZE}x{IMAGE_SIZE}")
-        num_writers = len(_class_order) if _class_order else len(ALL_WRITERS)
         logger.info(
-            f"   Writers: {num_writers} (IDs 1-{num_writers})")
+            f"   Writers: {len(_class_order)} (IDs 1-{len(_class_order)})")
+        logger.info(
+            f"   Preprocessing: CLAHE={'ON' if PREPROCESS_CLAHE else 'OFF'}")
 
     except Exception as e:
-        logger.error(f"❌ Failed to initialize model: {e}")
+        logger.error(f"Failed to initialize model: {e}")
         raise
 
 
@@ -327,7 +319,7 @@ async def get_model_info():
 async def root():
     """API root - basic info"""
     demo_info = ""
-    writers_info = f"{len(ALL_WRITERS)} writers"
+    writers_info = f"{len(_class_order) if _class_order else len(ALL_WRITERS)} writers"
 
     # Get actual model type
     if _model is None:

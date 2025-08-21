@@ -62,6 +62,25 @@ class HandwritingDataset(Dataset):
 
 
 # ----------------------------
+# Transforms helpers (top-level for pickling with num_workers)
+# ----------------------------
+class ApplyCLAHE:
+    """Apply OpenCV CLAHE to a numpy grayscale image if enabled."""
+
+    def __init__(self, enabled: bool = True, clip_limit: float = 2.0, tile_grid_size=(8, 8)):
+        self.enabled = enabled
+        self.clip_limit = clip_limit
+        self.tile_grid_size = tile_grid_size
+
+    def __call__(self, img_np: np.ndarray) -> np.ndarray:
+        if not self.enabled:
+            return img_np
+        clahe = cv2.createCLAHE(clipLimit=self.clip_limit,
+                                tileGridSize=self.tile_grid_size)
+        return clahe.apply(img_np)
+
+
+# ----------------------------
 # Data preparation
 # ----------------------------
 def _discover_writers_from_dir(base_dir: str):
@@ -93,6 +112,7 @@ def prepare_data(batch_size=BATCH_SIZE):
 
     # Transforms
     train_transform = T.Compose([
+        ApplyCLAHE(enabled=PREPROCESS_CLAHE),
         T.ToPILImage(),
         T.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         T.RandomRotation((-5, 5)),
@@ -102,6 +122,7 @@ def prepare_data(batch_size=BATCH_SIZE):
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
     val_transform = T.Compose([
+        ApplyCLAHE(enabled=PREPROCESS_CLAHE),
         T.ToPILImage(),
         T.Resize((IMAGE_SIZE, IMAGE_SIZE)),
         T.Grayscale(num_output_channels=3),
@@ -231,7 +252,8 @@ def validate_one_epoch(model, loader, criterion, device):
 # ----------------------------
 def train_efficientnet(train_loader, val_loader, writer_list, device):
     print("* INITIALISING EFFICIENTNET-B0 MODEL *")
-    model = EfficientNetClassifier(num_writers=len(writer_list))
+    model = EfficientNetClassifier(
+        num_writers=len(writer_list), use_pretrained=True)
     model.to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -249,22 +271,28 @@ def train_efficientnet(train_loader, val_loader, writer_list, device):
     for epoch in range(NUM_EPOCHS):
         start_time = time.time()
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, criterion, optimizer, device)
+            model, train_loader, criterion, optimizer, device
+        )
         val_loss, val_acc = validate_one_epoch(
-            model, val_loader, criterion, device)
+            model, val_loader, criterion, device
+        )
 
-        scheduler.step(val_acc)  # adjust LR based on val accuracy
+        # adjust LR based on val accuracy
+        scheduler.step(val_acc)
 
         epoch_time = time.time() - start_time
-        print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] "
-              f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
-              f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
-              f"Time: {epoch_time:.1f}s")
+        print(
+            f"Epoch [{epoch+1}/{NUM_EPOCHS}] "
+            f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}% | "
+            f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}% | "
+            f"Time: {epoch_time:.1f}s"
+        )
 
         # Save best model
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             patience_counter = 0
+
             # Save state_dict as primary model file for inference
             model_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
             torch.save(model.state_dict(), model_path)
@@ -272,16 +300,20 @@ def train_efficientnet(train_loader, val_loader, writer_list, device):
             # Also save a training checkpoint alongside (optional)
             base_name, _ext = os.path.splitext(BEST_MODEL_NAME)
             ckpt_path = os.path.join(MODEL_SAVE_PATH, f"{base_name}.ckpt")
-            torch.save({
-                "epoch": epoch + 1,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "val_acc": val_acc,
-            }, ckpt_path)
+            torch.save(
+                {
+                    "epoch": epoch + 1,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "val_acc": val_acc,
+                },
+                ckpt_path,
+            )
 
             # Sidecar labels file with correct name
             sidecar_path = os.path.join(
-                MODEL_SAVE_PATH, f"{base_name}.labels.json")
+                MODEL_SAVE_PATH, f"{base_name}.labels.json"
+            )
             payload = {
                 "all_writers": list(writer_list),
                 "created": datetime.utcnow().isoformat() + "Z",
@@ -311,7 +343,7 @@ def train_efficientnet(train_loader, val_loader, writer_list, device):
 # Main entry
 # ----------------------------
 def train_supervised():
-    print("=== BETFRED HANDWRITING TRAINING (EfficientNet) ===")
+    print("=== HANDWRITING TRAINING ===")
     set_seed(42)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

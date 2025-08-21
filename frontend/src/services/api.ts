@@ -2,6 +2,7 @@ import axios, { AxiosProgressEvent } from 'axios';
 import { BetRecord, Customer, Alert } from '../types';
 
 const API_URL = process.env.REACT_APP_API_URL || '/api';
+const OCR_API_URL = process.env.REACT_APP_OCR_API_URL || 'http://localhost:8002';
 
 export const apiService = {
   // Bet Records
@@ -58,5 +59,29 @@ export const apiService = {
   // Backend provides dashboard stats via Alerts or System controller
   const response = await axios.get(`${API_URL}/alerts/dashboard`);
     return response.data;
+  }
+};
+
+export const ocrService = {
+  async suggestStake(file: File): Promise<{ stake: number | null; method: string | null; currency?: string | null }>{
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await axios.post(`${OCR_API_URL}/ocr/stake`, formData);
+    return response.data;
+  },
+  async logSuggestion(payload: {
+    betRecordId?: number;
+    fileName?: string;
+    fileSize?: number;
+    fileHash?: string;
+    stake?: number;
+    currency?: string | null;
+    method?: string | null;
+  }): Promise<{ id: number } & any> {
+    const res = await axios.post(`/api/ocr-suggestions`, payload);
+    return res.data;
+  },
+  async acceptSuggestion(id: number): Promise<void> {
+    await axios.post(`/api/ocr-suggestions/${id}/accept`);
   }
 };

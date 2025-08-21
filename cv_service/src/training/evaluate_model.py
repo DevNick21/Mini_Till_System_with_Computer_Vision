@@ -1,32 +1,44 @@
 """
-Detailed evaluation of the trained handwriting classifier
+Detailed evaluation of the trained handwriting classifier.
 
+Key changes for current setup:
+- Uses labels sidecar (best_efficientnet_classifier.labels.json) to align class order with training.
+- Evaluates on dataset_splits/val if available; otherwise falls back to SLIPS_DIR.
+- Applies the same validation transforms as training; optional CLAHE toggle supported.
+- Saves a correctly labeled confusion matrix (PNG + CSV) and summary metrics.
 """
-# Set matplotlib backend BEFORE any other imports that might use it
+
+import matplotlib.pyplot as plt
+# imports constants like SLIPS_DIR, MODEL_SAVE_PATH, IMAGE_SIZE, thresholds
 from ..utils.config import *
 from ..models.efficientnet_classifier import EfficientNetClassifier
-import sys
 import os
-import pandas as pd
 import json
 from collections import defaultdict, Counter
-import seaborn as sns
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-import numpy as np
+from pathlib import Path
+
 import cv2
-import torchvision.transforms as T
-from torch.utils.data import DataLoader
+import numpy as np
+import pandas as pd
+import seaborn as sns
 import torch
-import matplotlib.pyplot as plt
+import torchvision.transforms as T
+from sklearn.metrics import confusion_matrix, accuracy_score
+from torch.utils.data import DataLoader, Dataset
+
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg')  # headless plotting
 
 
-class EvaluationDataset:
-    """Simple dataset for evaluation"""
+class EvaluationDataset(Dataset):
+    """Evaluation dataset built from a split directory using a fixed class order."""
 
-    def __init__(self, slips_dir):
-        self.slips_dir = slips_dir
+    def __init__(self, split_dir: str, class_order: list[str]):
+        self.split_dir = split_dir
+        self.class_order = class_order
+        self.writer_to_id = {w: i for i, w in enumerate(self.class_order)}
+
+        # Match validation transforms used during training to avoid distribution shift
         self.transform = T.Compose([
             T.ToPILImage(),
             T.Resize((IMAGE_SIZE, IMAGE_SIZE)),
@@ -35,22 +47,23 @@ class EvaluationDataset:
             T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         ])
 
-        # Load all images
-        self.image_paths = []
-        self.labels = []
-        self.writer_names = []
+        # Load all images for known classes only
+        self.image_paths: list[str] = []
+        self.labels: list[int] = []
+        self.writer_names: list[str] = []
 
-        for writer in ALL_WRITERS:
-            writer_path = os.path.join(slips_dir, writer)
-            if os.path.exists(writer_path):
-                for img_file in os.listdir(writer_path):
-                    if img_file.lower().endswith(('.jpg', '.jpeg', '.png')):
-                        img_path = os.path.join(writer_path, img_file)
-                        test_img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-                        if test_img is not None:
-                            self.image_paths.append(img_path)
-                            self.labels.append(WRITER_TO_ID[writer])
-                            self.writer_names.append(writer)
+        for writer in self.class_order:
+            writer_path = os.path.join(self.split_dir, writer)
+            if not os.path.isdir(writer_path):
+                continue
+            for img_file in os.listdir(writer_path):
+                if img_file.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")):
+                    img_path = os.path.join(writer_path, img_file)
+                    test_img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+                    if test_img is not None:
+                        self.image_paths.append(img_path)
+                        self.labels.append(self.writer_to_id[writer])
+                        self.writer_names.append(writer)
 
     def __len__(self):
         return len(self.image_paths)
@@ -61,46 +74,76 @@ class EvaluationDataset:
         if img is None:
             img = np.zeros((IMAGE_SIZE, IMAGE_SIZE), dtype=np.uint8)
 
-        img = cv2.resize(img, (IMAGE_SIZE, IMAGE_SIZE))
+        # Optional CLAHE to mirror inference if enabled
+        if PREPROCESS_CLAHE:
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            img = clahe.apply(img)
+
+        # Resize and normalize via torchvision transforms (same order as training)
         img = self.transform(img)
 
         return img, self.labels[idx], self.writer_names[idx], img_path
 
 
-def load_trained_model(model_path):
-    """Load the trained model"""
-    model = EfficientNetClassifier()
-    # Load the trained EfficientNet model
-    if model_path and os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path, map_location='cpu'))
-    elif os.path.exists(os.path.join(MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")):
-        model.load_state_dict(torch.load(os.path.join(
-            MODEL_SAVE_PATH, "best_efficientnet_classifier.pth"), map_location='cpu'))
+def load_trained_model(model_path: str, class_order: list[str], device: torch.device):
+    """Load the trained EfficientNet model sized to class_order."""
+    model = EfficientNetClassifier(
+        num_writers=len(class_order), use_pretrained=True)
+    weights_path = model_path
+    if not weights_path:
+        weights_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
+    state = torch.load(weights_path, map_location=device)
+    model.load_state_dict(state)
+    model.to(device)
     model.eval()
     return model
 
 
 def evaluate_model_detailed():
-    """Comprehensive model evaluation"""
+    """Comprehensive model evaluation using sidecar label order and val split."""
 
-    print("🔍 DETAILED MODEL EVALUATION")
+    print("DETAILED MODEL EVALUATION")
     print("=" * 50)
 
-    # Load model
-    model_path = os.path.join(
-        MODEL_SAVE_PATH, "best_efficientnet_classifier.pth")
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_trained_model(model_path)
-    model.to(device)
 
-    print(f"✅ EfficientNet model loaded successfully from {model_path}")
+    # Determine evaluation directory (prefer dataset_splits/val)
+    base_dir = os.path.abspath(os.path.join(SLIPS_DIR, os.pardir))
+    split_val = os.path.join(base_dir, "dataset_splits", "val")
+    eval_dir = split_val if os.path.isdir(split_val) else SLIPS_DIR
+
+    # Load class order from sidecar if available
+    base_name, _ = os.path.splitext(BEST_MODEL_NAME)
+    sidecar_path = os.path.join(MODEL_SAVE_PATH, f"{base_name}.labels.json")
+    class_order = None
+    if os.path.exists(sidecar_path):
+        try:
+            with open(sidecar_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            if isinstance(payload, dict) and isinstance(payload.get("all_writers"), list):
+                class_order = payload["all_writers"]
+                print(
+                    f"Loaded class order from sidecar ({len(class_order)} classes)")
+        except Exception as e:
+            print(f"Warning: failed to read labels sidecar: {e}")
+    if class_order is None:
+        # Fallback: discover from eval_dir subfolders; else use config ALL_WRITERS
+        discovered = [d for d in os.listdir(
+            eval_dir) if os.path.isdir(os.path.join(eval_dir, d))]
+        class_order = sorted(discovered) if discovered else list(ALL_WRITERS)
+        print(
+            f"Using discovered/config class order ({len(class_order)} classes)")
+
+    # Load model sized to class order
+    weights_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
+    model = load_trained_model(weights_path, class_order, device)
+    print(f"EfficientNet model loaded successfully from {weights_path}")
     print(f"   Device: {device}")
 
     # Create evaluation dataset
-    eval_dataset = EvaluationDataset(SLIPS_DIR)
+    eval_dataset = EvaluationDataset(eval_dir, class_order)
     eval_loader = DataLoader(eval_dataset, batch_size=1, shuffle=False)
-
+    print(f"   Eval dir: {eval_dir}")
     print(f"   Total samples: {len(eval_dataset)}")
 
     # Collect predictions
@@ -135,7 +178,7 @@ def evaluate_model_detailed():
             prediction_details.append({
                 'image_path': img_paths[0],
                 'true_writer': writer_names[0],
-                'predicted_writer': ID_TO_WRITER[pred_id],
+                'predicted_writer': class_order[pred_id],
                 'confidence': conf_score,
                 'correct': pred_id == true_id,
                 'true_id': true_id,
@@ -167,7 +210,7 @@ def evaluate_model_detailed():
             writer_stats[writer]['correct'] += 1
 
     writer_performance = []
-    for writer in ALL_WRITERS:
+    for writer in class_order:
         if writer in writer_stats:
             stats = writer_stats[writer]
             accuracy = stats['correct'] / \
@@ -198,9 +241,9 @@ def evaluate_model_detailed():
                    MEDIUM_CONFIDENCE_THRESHOLD)
 
     print(
-        f"High confidence (≥{HIGH_CONFIDENCE_THRESHOLD}): {high_conf:3d} ({high_conf/len(all_confidences)*100:.1f}%)")
+        f"High confidence (>={HIGH_CONFIDENCE_THRESHOLD}): {high_conf:3d} ({high_conf/len(all_confidences)*100:.1f}%)")
     print(
-        f"Med confidence (≥{MEDIUM_CONFIDENCE_THRESHOLD}): {med_conf:3d} ({med_conf/len(all_confidences)*100:.1f}%)")
+        f"Med confidence (>={MEDIUM_CONFIDENCE_THRESHOLD}): {med_conf:3d} ({med_conf/len(all_confidences)*100:.1f}%)")
     print(
         f"Low confidence (<{MEDIUM_CONFIDENCE_THRESHOLD}): {low_conf:3d} ({low_conf/len(all_confidences)*100:.1f}%)")
 
@@ -221,7 +264,7 @@ def evaluate_model_detailed():
         print(f"Most common confusions:")
         confusion_pairs = defaultdict(int)
         for error in errors:
-            pair = f"{error['true_writer']} → {error['predicted_writer']}"
+            pair = f"{error['true_writer']} -> {error['predicted_writer']}"
             confusion_pairs[pair] += 1
 
         for pair, count in sorted(confusion_pairs.items(), key=lambda x: x[1], reverse=True)[:5]:
@@ -247,13 +290,17 @@ def evaluate_model_detailed():
     with open(results_path, 'w') as f:
         json.dump(results, f, indent=2)
 
-    print(f"\n📊 Detailed ensemble results saved to: {results_path}")
+    print(f"\nDetailed evaluation results saved to: {results_path}")
 
-    return results, prediction_details
+    return results, prediction_details, class_order
 
 
-def analyze_similar_writers(prediction_details):
-    """Find which writers are most often confused"""
+def analyze_similar_writers(prediction_details, writers_list=None):
+    """Find which writers are most often confused.
+
+    If writers_list is provided, it defines the set/order of writers to analyze.
+    Otherwise falls back to ALL_WRITERS from config.
+    """
 
     print(f"\n=== WRITER SIMILARITY ANALYSIS ===")
 
@@ -267,8 +314,9 @@ def analyze_similar_writers(prediction_details):
 
     # Find most confused pairs
     confusion_pairs = []
-    for true_writer in ALL_WRITERS:
-        for pred_writer in ALL_WRITERS:
+    base_writers = list(writers_list) if writers_list else list(ALL_WRITERS)
+    for true_writer in base_writers:
+        for pred_writer in base_writers:
             if true_writer != pred_writer:
                 count = confusion_counts[true_writer][pred_writer]
                 if count > 0:
@@ -283,7 +331,7 @@ def analyze_similar_writers(prediction_details):
     return confusion_pairs
 
 
-def generate_betfred_visualizations(all_labels, all_predictions, all_confidences, writer_performance, save_dir="trained_models", all_writers=ALL_WRITERS):
+def generate_betfred_visualizations(all_labels, all_predictions, all_confidences, writer_performance, save_dir="trained_models", all_writers=None):
     """
     Generate all key evaluation plots with Betfred branding.
     """
@@ -299,6 +347,9 @@ def generate_betfred_visualizations(all_labels, all_predictions, all_confidences
 
     # ---- Confusion Matrix ----
     cm = confusion_matrix(all_labels, all_predictions)
+    if all_writers is None:
+        # Default to numeric labels if none provided
+        all_writers = [str(i) for i in range(cm.shape[0])]
     plt.figure(figsize=(11, 9))
     sns.heatmap(
         cm,
@@ -378,13 +429,14 @@ def generate_betfred_visualizations(all_labels, all_predictions, all_confidences
     cm_df.to_csv(os.path.join(
         save_dir, "efficientnet_confusion_matrix_betfred.csv"))
 
-    print("\n✅ Betfred-branded evaluation visuals saved in:",
+    print("\nBetfred-branded evaluation visuals saved in:",
           os.path.abspath(save_dir))
 
 
 if __name__ == "__main__":
-    results, details = evaluate_model_detailed()
-    confusion_pairs = analyze_similar_writers(details)
+    results, details, class_order = evaluate_model_detailed()
+    confusion_pairs = analyze_similar_writers(
+        details, writers_list=class_order)
     all_labels = [d['true_id'] for d in details]
     all_predictions = [d['predicted_id'] for d in details]
     all_confidences = [d['confidence'] for d in details]
@@ -397,7 +449,7 @@ if __name__ == "__main__":
         all_confidences,
         writer_performance,
         save_dir=MODEL_SAVE_PATH,
-        all_writers=ALL_WRITERS
+        all_writers=class_order
     )
 
     print(f"\n🎯 EFFICIENTNET MODEL SUMMARY:")

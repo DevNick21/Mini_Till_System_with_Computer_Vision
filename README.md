@@ -1,4 +1,4 @@
-# BetFred Smart Customer Behaviour Tracker
+# Mini Till System
 
 End-to-end system for tracking customer activity with handwriting-based slip classification, simple threshold monitoring, and alerts.
 
@@ -38,10 +38,10 @@ This repo contains a .NET 8 Web API backend, a React SPA frontend, and a Python 
 - Logging: Serilog (console + file)
 - ML Integration: Python FastAPI service
 
-## Project Structure (high level)
+## Project Structure
 
 ```
-bet_fred/
+main/
 ├── Program.cs                  # App startup & DI
 ├── appsettings.json            # Configuration
 ├── Controllers/                # API endpoints (Bets, Customers, Alerts, System)
@@ -143,7 +143,7 @@ System utilities (`/api/system`):
 
 ## Database Models
 
-- Customers — Minimal customer entity (Id, Name)
+- Customers — Customer entity (Id, Name)
 - BetRecords — Amount, PlacedAt, ImageData, optional CustomerId, classification fields
 - Alerts — Threshold breach notifications
 - ThresholdRules — Simple numeric rules (Name, Value, TimeWindowMinutes, IsActive)

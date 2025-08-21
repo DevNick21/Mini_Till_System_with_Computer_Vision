@@ -9,7 +9,7 @@ Usage:
     --seed 42 --min-per-writer 10
 
 Rules:
-  - Keeps directory names (e.g., anon_###) under each split.
+  - Keeps directory names under each split.
   - Ensures each writer has at least min-per-writer images; otherwise fails.
   - Uses random but reproducible shuffling with --seed.
 """

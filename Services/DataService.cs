@@ -31,6 +31,11 @@ namespace bet_fred.Services
         // DASHBOARD OPERATIONS
         Task<object> GetDashboardStatsAsync();
         Task<IEnumerable<Alert>> GetAlertsAsync();
+
+        // OCR Suggestions
+        Task<OcrSuggestion> CreateOcrSuggestionAsync(OcrSuggestion suggestion);
+        Task<bool> MarkOcrSuggestionAcceptedAsync(int id);
+        Task<OcrSuggestion?> GetOcrSuggestionByIdAsync(int id);
     }
 
     public class DataService : IDataService
@@ -275,6 +280,28 @@ namespace bet_fred.Services
                 _logger.LogError(ex, "Error updating bet record {BetId}", betRecord.Id);
                 return null;
             }
+        }
+
+        public async Task<OcrSuggestion> CreateOcrSuggestionAsync(OcrSuggestion suggestion)
+        {
+            _context.OcrSuggestions.Add(suggestion);
+            await _context.SaveChangesAsync();
+            return suggestion;
+        }
+
+        public async Task<bool> MarkOcrSuggestionAcceptedAsync(int id)
+        {
+            var s = await _context.OcrSuggestions.FindAsync(id);
+            if (s == null) return false;
+            s.Accepted = true;
+            s.AcceptedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return true;
+        }
+
+        public async Task<OcrSuggestion?> GetOcrSuggestionByIdAsync(int id)
+        {
+            return await _context.OcrSuggestions.FindAsync(id);
         }
 
         // Removed dev-only ClearAllBetsAsync to reduce surface area

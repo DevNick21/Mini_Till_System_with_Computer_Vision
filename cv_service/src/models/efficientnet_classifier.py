@@ -21,7 +21,7 @@ class EfficientNetClassifier(nn.Module):
     Output: (batch_size, num_writers)
     """
 
-    def __init__(self, num_writers=None, dropout_rate=None):
+    def __init__(self, num_writers=None, dropout_rate=None, use_pretrained: bool = True):
         super().__init__()
 
         # Defaults from config
@@ -33,10 +33,21 @@ class EfficientNetClassifier(nn.Module):
         self.num_writers = num_writers
 
         # EfficientNet backbone
+        self.used_pretrained = False
         try:
-            backbone = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT)
-        except (AttributeError, TypeError):
+            if use_pretrained:
+                backbone = efficientnet_b0(
+                    weights=EfficientNet_B0_Weights.DEFAULT)
+                self.used_pretrained = True
+            else:
+                backbone = efficientnet_b0(weights=None)
+        except Exception as e:
+            # Any failure (e.g., no internet/cache) -> fall back to random init
+            print(
+                f"[EfficientNetClassifier] Warning: failed to load pretrained weights, falling back to random init. Reason: {e}"
+            )
             backbone = efficientnet_b0(weights=None)
+            self.used_pretrained = False
 
         # Use only convolutional feature extractor
         self.features = backbone.features
@@ -56,13 +67,16 @@ class EfficientNetClassifier(nn.Module):
             nn.ReLU(inplace=True),
             nn.BatchNorm1d(256),
             nn.Dropout(dropout_rate),
-            nn.Linear(256, num_writers)
+            nn.Linear(256, num_writers),
         )
 
-        print(f"EfficientNetClassifier initialized:")
+        # Diagnostics
+        print("EfficientNetClassifier initialized:")
         print(f"  Writers: {num_writers}")
         print(f"  Dropout rate: {dropout_rate}")
         print(f"  Parameters: {sum(p.numel() for p in self.parameters()):,}")
+        print(
+            f"  Pretrained weights: {'YES' if self.used_pretrained else 'NO'}")
 
     def forward(self, x):
         """Forward pass"""

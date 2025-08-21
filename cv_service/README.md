@@ -1,4 +1,4 @@
-# BetFred CV Service — EfficientNet Classification
+# CV Service — EfficientNet Classification
 
 Key endpoints
 
