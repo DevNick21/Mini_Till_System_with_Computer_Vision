@@ -16,12 +16,8 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 from sklearn.model_selection import train_test_split
 
-from ..models.efficientnet_classifier import EfficientNetClassifier
-from ..utils.config import *
-
-# ----------------------------
-# Utilities
-# ----------------------------
+from ..models import EfficientNetClassifier
+from ..config import *  # noqa: F401,F403
 
 
 def set_seed(seed: int = 42):
@@ -33,9 +29,6 @@ def set_seed(seed: int = 42):
     torch.backends.cudnn.benchmark = False
 
 
-# ----------------------------
-# Dataset
-# ----------------------------
 class HandwritingDataset(Dataset):
     """Dataset for handwriting classification"""
 
@@ -61,9 +54,6 @@ class HandwritingDataset(Dataset):
         return img, label
 
 
-# ----------------------------
-# Transforms helpers (top-level for pickling with num_workers)
-# ----------------------------
 class ApplyCLAHE:
     """Apply OpenCV CLAHE to a numpy grayscale image if enabled."""
 
@@ -80,15 +70,12 @@ class ApplyCLAHE:
         return clahe.apply(img_np)
 
 
-# ----------------------------
-# Data preparation
-# ----------------------------
 def _discover_writers_from_dir(base_dir: str):
     """Return sorted list of subfolder names as writer classes, or empty if none."""
     if not os.path.isdir(base_dir):
         return []
-    names = [d for d in os.listdir(base_dir)
-             if os.path.isdir(os.path.join(base_dir, d))]
+    names = [d for d in os.listdir(
+        base_dir) if os.path.isdir(os.path.join(base_dir, d))]
     return sorted(names)
 
 
@@ -131,7 +118,6 @@ def prepare_data(batch_size=BATCH_SIZE):
     ])
 
     if os.path.isdir(train_split) and os.path.isdir(val_split):
-        # Fixed split loading
         writer_list = _discover_writers_from_dir(train_split)
         if not writer_list:
             raise ValueError(f"No writer folders found under {train_split}")
@@ -190,7 +176,6 @@ def prepare_data(batch_size=BATCH_SIZE):
         train_paths, train_labels, train_transform)
     val_dataset = HandwritingDataset(val_paths, val_labels, val_transform)
 
-    # Use multiple workers for faster loading
     num_workers = min(8, max(1, (os.cpu_count() or 2) // 2))
 
     train_loader = DataLoader(
@@ -201,9 +186,6 @@ def prepare_data(batch_size=BATCH_SIZE):
     return train_loader, val_loader, writer_list
 
 
-# ----------------------------
-# Training / Validation
-# ----------------------------
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     total_loss, correct, total = 0.0, 0, 0
@@ -247,9 +229,6 @@ def validate_one_epoch(model, loader, criterion, device):
     return avg_loss, accuracy
 
 
-# ----------------------------
-# Training loop
-# ----------------------------
 def train_efficientnet(train_loader, val_loader, writer_list, device):
     print("* INITIALISING EFFICIENTNET-B0 MODEL *")
     model = EfficientNetClassifier(
@@ -271,13 +250,10 @@ def train_efficientnet(train_loader, val_loader, writer_list, device):
     for epoch in range(NUM_EPOCHS):
         start_time = time.time()
         train_loss, train_acc = train_one_epoch(
-            model, train_loader, criterion, optimizer, device
-        )
+            model, train_loader, criterion, optimizer, device)
         val_loss, val_acc = validate_one_epoch(
-            model, val_loader, criterion, device
-        )
+            model, val_loader, criterion, device)
 
-        # adjust LR based on val accuracy
         scheduler.step(val_acc)
 
         epoch_time = time.time() - start_time
@@ -288,16 +264,13 @@ def train_efficientnet(train_loader, val_loader, writer_list, device):
             f"Time: {epoch_time:.1f}s"
         )
 
-        # Save best model
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             patience_counter = 0
 
-            # Save state_dict as primary model file for inference
             model_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
             torch.save(model.state_dict(), model_path)
 
-            # Also save a training checkpoint alongside (optional)
             base_name, _ext = os.path.splitext(BEST_MODEL_NAME)
             ckpt_path = os.path.join(MODEL_SAVE_PATH, f"{base_name}.ckpt")
             torch.save(
@@ -310,10 +283,8 @@ def train_efficientnet(train_loader, val_loader, writer_list, device):
                 ckpt_path,
             )
 
-            # Sidecar labels file with correct name
             sidecar_path = os.path.join(
-                MODEL_SAVE_PATH, f"{base_name}.labels.json"
-            )
+                MODEL_SAVE_PATH, f"{base_name}.labels.json")
             payload = {
                 "all_writers": list(writer_list),
                 "created": datetime.utcnow().isoformat() + "Z",
@@ -330,18 +301,13 @@ def train_efficientnet(train_loader, val_loader, writer_list, device):
                 print(f"⏹️ Early stopping triggered after {epoch+1} epochs")
                 break
 
-    # Load best model
     model_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
     state_dict = torch.load(model_path, map_location=device)
-    # state_dict is the model weights saved above
     model.load_state_dict(state_dict)
 
     return model, best_val_acc
 
 
-# ----------------------------
-# Main entry
-# ----------------------------
 def train_supervised():
     print("=== HANDWRITING TRAINING ===")
     set_seed(42)

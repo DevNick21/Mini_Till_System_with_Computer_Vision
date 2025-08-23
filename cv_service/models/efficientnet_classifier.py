@@ -4,7 +4,7 @@ EfficientNet-based handwriting classifier model
 import torch
 import torch.nn as nn
 from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
-from ..utils.config import ALL_WRITERS, DROPOUT_RATE
+from config import ALL_WRITERS, DROPOUT_RATE
 
 
 class EfficientNetClassifier(nn.Module):
@@ -12,7 +12,7 @@ class EfficientNetClassifier(nn.Module):
     CNN-based handwriting classifier using EfficientNet-B0 backbone.
 
     Architecture:
-    - EfficientNet-B0 backbone (pre-trained on ImageNet)
+    - EfficientNet-B0 backbone
     - Adaptive pooling to convert feature maps to fixed size
     - Custom classification head for writer identification
     - Dropout for regularization
@@ -42,9 +42,8 @@ class EfficientNetClassifier(nn.Module):
             else:
                 backbone = efficientnet_b0(weights=None)
         except Exception as e:
-            # Any failure (e.g., no internet/cache) -> fall back to random init
             print(
-                f"[EfficientNetClassifier] Warning: failed to load pretrained weights, falling back to random init. Reason: {e}"
+                f"Warning: failed to load pretrained weights, falling back to random init. Reason: {e}"
             )
             backbone = efficientnet_b0(weights=None)
             self.used_pretrained = False
@@ -98,7 +97,6 @@ class EfficientNetClassifier(nn.Module):
         return predicted, confidence
 
 
-# Test the model
 if __name__ == "__main__":
     model = EfficientNetClassifier()
     dummy_input = torch.randn(1, 3, 224, 224)

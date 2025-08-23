@@ -4,11 +4,11 @@ Configuration for supervised handwriting classification (production)
 import os
 from pathlib import Path
 
-# Define the base directory
-CURRENT_DIR = Path(__file__).parent.parent.parent
+# Base directory for cv_service
+CURRENT_DIR = Path(__file__).parent
 
 # All 12 writers
-ALL_WRITERS = ["anon"+str(i + 1) for i in range(12)]
+ALL_WRITERS = ["anon" + str(i + 1) for i in range(12)]
 
 # Create mapping between writer names and numeric IDs
 WRITER_TO_ID = {writer: idx for idx, writer in enumerate(ALL_WRITERS)}

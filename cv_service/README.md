@@ -4,7 +4,7 @@ Key endpoints
 
 - GET /health
 - GET /model-info
-- POST /classify-anonymous (multipart field: file)
+- POST /classify-anonymous
 
 Scripts
 
@@ -18,21 +18,16 @@ Scripts
 
 Training
 
-- Entry: python -m cv_service.src.training.train_model
+- Entry: python -m cv_service.training.train_model
 - Best model saved to cv_service/trained_models/best_efficientnet_classifier.pth
 - Labels sidecar: cv_service/trained_models/best_efficientnet_classifier.labels.json
 
 Serving
 
-- Start API: python cv_service/run_api.py
+- Start API: python -m classification_api
 - Base URL: <http://localhost:8001/>
 
 A machine learning service to classify handwritten bet slips for safer gambling monitoring.
-
-## Management Tools
-
-- **train.py**: Train the classification model
-- **run_api.py**: Launch the API server
 
 ## Overview
 
@@ -41,10 +36,10 @@ This service provides a REST API for classifying handwritten bet slips to identi
 ## Features
 
 - **EfficientNet Classification**: Uses EfficientNet-B0 as the model for optimal accuracy-efficiency balance
-- **REST API**: Easy integration with the BetFred .NET application
+- **REST API**: Easy integration with the .NET application
 - **Confidence Scoring**: Provides confidence levels for each classification
 - **Preprocessing**: Matches training pipeline (resize, grayscale to 3ch, normalize)
-  
+
 
 ## Models
 
@@ -74,7 +69,7 @@ pip install -r requirements.txt
 1. Train the models:
 
 ```bash
-python train.py
+python -m cv_service.training.train_model
 ```
 
 ## Usage
@@ -82,7 +77,7 @@ python train.py
 ### Start the API
 
 ```bash
-python run_api.py
+python -m classification_api
 ```
 
 The API will be available at `http://localhost:8001`.
@@ -110,7 +105,7 @@ Additional Tools
 
 ## Configuration
 
-Configuration is unified in a single file: `src/utils/config.py`.
+Configuration is in a single file: `cv_service/config.py`.
 
 This includes:
 
@@ -126,7 +121,7 @@ This includes:
 To train the models:
 
 ```bash
-python -m src.training.train_model
+python -m cv_service.training.train_model
 ```
 
 This will:
@@ -135,14 +130,7 @@ This will:
 2. Evaluate its performance
 3. Save the best model weights and configurations
 
-## Demo Mode
-
-Removed. The service now always runs with the trained model outputs.
-
 ## Integration
 
-This service is designed to integrate with the BetFred .NET application through the ClassificationService component.
+This service is designed to integrate with the .NET application through the ClassificationService component.
 
-## License
-
-Proprietary - BetFred 2025

@@ -1,3 +1,0 @@
-"""
-CV Service Training Module
-"""
