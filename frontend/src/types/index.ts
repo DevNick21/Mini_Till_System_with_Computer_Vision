@@ -19,12 +19,11 @@ export interface Alert {
   alertType: string;
   createdAt: string;
   isResolved: boolean;
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
+  resolutionNotes?: string | null;
+  betRecordId?: number | null;
+  customer?: any | null;
+  betRecord?: any | null;
 }
 
-export interface ThresholdRule {
-  id: number;
-  name: string;
-  threshold: number;
-  timeWindow: number;
-  isActive: boolean;
-}

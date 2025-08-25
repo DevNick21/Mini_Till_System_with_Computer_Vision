@@ -1,87 +1,71 @@
 import axios, { AxiosProgressEvent } from 'axios';
 import { BetRecord, Customer, Alert } from '../types';
 
-const API_URL = process.env.REACT_APP_API_URL || '/api';
-const OCR_API_URL = process.env.REACT_APP_OCR_API_URL || 'http://localhost:8002';
+const API_BASE = process.env.REACT_APP_API_URL || '/api';
 
-export const apiService = {
-  // Bet Records
-  async uploadBetImage(file: File, amount?: number, customerId?: number, onProgress?: (percent: number) => void): Promise<string> {
+// Simplified API service
+class ApiService {
+  // Generic HTTP methods
+  async get<T>(endpoint: string): Promise<T> {
+    const response = await axios.get(`${API_BASE}${endpoint}`);
+    return response.data;
+  }
+
+  async post<T>(endpoint: string, data?: any, config?: any): Promise<T> {
+    const response = await axios.post(`${API_BASE}${endpoint}`, data, config);
+    return response.data;
+  }
+
+  async put<T>(endpoint: string, data: any): Promise<T> {
+    const response = await axios.put(`${API_BASE}${endpoint}`, data);
+    return response.data;
+  }
+
+  async delete(endpoint: string): Promise<void> {
+    await axios.delete(`${API_BASE}${endpoint}`);
+  }
+
+  // Bet operations
+  async uploadBet(file: File, amount?: number, customerId?: number, onProgress?: (percent: number) => void): Promise<BetRecord> {
     const formData = new FormData();
     formData.append('file', file);
     if (typeof amount === 'number') formData.append('amount', String(amount));
     if (typeof customerId === 'number') formData.append('customerId', String(customerId));
-    const response = await axios.post(`${API_URL}/bet/upload`, formData, {
+    
+    return this.post('/bet/upload', formData, {
       onUploadProgress: (evt: AxiosProgressEvent) => {
         if (onProgress && evt.total) {
-          const pct = Math.round((evt.loaded / evt.total) * 100);
-          onProgress(pct);
+          onProgress(Math.round((evt.loaded / evt.total) * 100));
         }
       }
     });
-    // Backend may return the whole object or just the id string; normalize to id string
-    const data = response.data as any;
-    return typeof data === 'string' ? data : String(data?.id ?? '');
-  },
-
-  async createBet(betData: Partial<BetRecord>): Promise<BetRecord> {
-    const response = await axios.post(`${API_URL}/bet`, betData);
-    return response.data;
-  },
-  
-  async updateBet(id: number, betData: Partial<BetRecord>): Promise<BetRecord> {
-    const response = await axios.put(`${API_URL}/bet/${id}`, betData);
-    return response.data;
-  },
+  }
 
   async getRecentBets(): Promise<BetRecord[]> {
-    const response = await axios.get(`${API_URL}/bet/recent`);
-    return response.data;
-  },
+    return this.get('/bet/recent');
+  }
 
-  // SSE removed; rely on polling for now
-
-  // Customers
+  // Customer operations
   async getCustomers(): Promise<Customer[]> {
-    const response = await axios.get(`${API_URL}/customers`);
-    return response.data;
-  },
+    return this.get('/customers');
+  }
 
+  async createCustomer(name: string): Promise<Customer> {
+    return this.post('/customers', { name });
+  }
 
-  // Alerts
+  // Alert operations
   async getAlerts(): Promise<Alert[]> {
-    const response = await axios.get(`${API_URL}/alerts`);
-    return response.data;
-  },
-
-  // Dashboard
-  async getDashboardStats(): Promise<any> {
-  // Backend provides dashboard stats via Alerts or System controller
-  const response = await axios.get(`${API_URL}/alerts/dashboard`);
-    return response.data;
+    return this.get('/alerts');
   }
-};
 
-export const ocrService = {
-  async suggestStake(file: File): Promise<{ stake: number | null; method: string | null; currency?: string | null }>{
-    const formData = new FormData();
-    formData.append('file', file);
-    const response = await axios.post(`${OCR_API_URL}/ocr/stake`, formData);
-    return response.data;
-  },
-  async logSuggestion(payload: {
-    betRecordId?: number;
-    fileName?: string;
-    fileSize?: number;
-    fileHash?: string;
-    stake?: number;
-    currency?: string | null;
-    method?: string | null;
-  }): Promise<{ id: number } & any> {
-    const res = await axios.post(`/api/ocr-suggestions`, payload);
-    return res.data;
-  },
-  async acceptSuggestion(id: number): Promise<void> {
-    await axios.post(`/api/ocr-suggestions/${id}/accept`);
+  async resolveAlert(id: number, resolvedBy?: string, notes?: string, customerId?: number): Promise<Alert> {
+    return this.post(`/alerts/${id}/resolve`, {
+      resolvedBy,
+      notes,
+      customerId
+    });
   }
-};
+}
+
+export const api = new ApiService();

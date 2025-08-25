@@ -2,12 +2,18 @@
 Classification API for Writer Identification System
 Provides REST endpoints for handwriting classification with confidence scoring
 """
+import os
+import sys
+
+# Add current directory to path for imports
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 from core import init_model, classify_image, model_info
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from pathlib import Path
 
 current_dir = Path(__file__).parent
@@ -42,15 +48,7 @@ app.add_middleware(
 )
 
 
-def to_camel(s: str) -> str:
-    """Convert snake_case to camelCase for JSON field names"""
-    parts = s.split('_')
-    return parts[0] + ''.join(p.title() for p in parts[1:])
-
-
 class ClassificationResult(BaseModel):
-    # Use camelCase aliases for JSON
-    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
     writer_id: int          # Numeric writer ID (1-13)
     confidence: float
 
@@ -132,7 +130,7 @@ async def classify_handwriting(file: UploadFile = File(...)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    return result.model_dump(by_alias=True)
+    return result.model_dump()
 
 
 @app.get("/model-info")

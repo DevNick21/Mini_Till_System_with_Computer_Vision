@@ -1,8 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
-using bet_fred.Services;
+using Microsoft.EntityFrameworkCore;
+using AutoMapper;
+using bet_fred.Data;
 using bet_fred.Models;
 using bet_fred.DTOs;
-using System.Linq;
 
 namespace bet_fred.Controllers
 {
@@ -10,12 +11,14 @@ namespace bet_fred.Controllers
     [Route("api/[controller]")]
     public class CustomersController : ControllerBase
     {
-        private readonly IDataService _dataService;
+        private readonly ApplicationDbContext _context;
+        private readonly IMapper _mapper;
         private readonly ILogger<CustomersController> _logger;
 
-        public CustomersController(IDataService dataService, ILogger<CustomersController> logger)
+        public CustomersController(ApplicationDbContext context, IMapper mapper, ILogger<CustomersController> logger)
         {
-            _dataService = dataService;
+            _context = context;
+            _mapper = mapper;
             _logger = logger;
         }
 
@@ -24,8 +27,8 @@ namespace bet_fred.Controllers
         {
             try
             {
-                var customers = await _dataService.GetCustomersAsync();
-                var customerDtos = customers.Select(c => MapToCustomerDto(c)).ToList();
+                var customers = await _context.Customers.ToListAsync();
+                var customerDtos = _mapper.Map<IEnumerable<CustomerDto>>(customers);
                 return Ok(customerDtos);
             }
             catch (Exception ex)
@@ -40,12 +43,12 @@ namespace bet_fred.Controllers
         {
             try
             {
-                var customer = await _dataService.GetCustomerByIdAsync(id);
+                var customer = await _context.Customers.FindAsync(id);
 
                 if (customer == null)
                     return NotFound();
 
-                return Ok(MapToCustomerDto(customer));
+                return Ok(_mapper.Map<CustomerDto>(customer));
             }
             catch (Exception ex)
             {
@@ -59,14 +62,13 @@ namespace bet_fred.Controllers
         {
             try
             {
-                var customer = new Customer
-                {
-                    Name = createDto.Name
-                };
-
-                var created = await _dataService.CreateCustomerAsync(customer);
-                var dto = MapToCustomerDto(created);
-                return CreatedAtAction(nameof(GetCustomer), new { id = created.Id }, dto);
+                var customer = _mapper.Map<Customer>(createDto);
+                
+                _context.Customers.Add(customer);
+                await _context.SaveChangesAsync();
+                
+                var dto = _mapper.Map<CustomerDto>(customer);
+                return CreatedAtAction(nameof(GetCustomer), new { id = customer.Id }, dto);
             }
             catch (Exception ex)
             {
@@ -80,20 +82,15 @@ namespace bet_fred.Controllers
         {
             try
             {
-                // First, get the existing customer
-                var existing = await _dataService.GetCustomerByIdAsync(id);
+                var existing = await _context.Customers.FindAsync(id);
                 if (existing == null)
                     return NotFound();
 
-                // Update only the properties that are provided
-                if (updateDto.Name != null) existing.Name = updateDto.Name;
+                _mapper.Map(updateDto, existing);
+                
+                await _context.SaveChangesAsync();
 
-                var updated = await _dataService.UpdateCustomerAsync(id, existing);
-
-                if (updated == null)
-                    return NotFound();
-
-                return Ok(MapToCustomerDto(updated));
+                return Ok(_mapper.Map<CustomerDto>(existing));
             }
             catch (Exception ex)
             {
@@ -107,10 +104,13 @@ namespace bet_fred.Controllers
         {
             try
             {
-                var success = await _dataService.DeleteCustomerAsync(id);
-
-                if (!success)
+                var customer = await _context.Customers.FindAsync(id);
+                
+                if (customer == null)
                     return NotFound();
+
+                _context.Customers.Remove(customer);
+                await _context.SaveChangesAsync();
 
                 return Ok("Customer deleted successfully");
             }
@@ -119,18 +119,6 @@ namespace bet_fred.Controllers
                 _logger.LogError(ex, "Error deleting customer {Id}", id);
                 return StatusCode(500, "Error deleting customer");
             }
-        }
-
-        /// <summary>
-        /// Maps a Customer entity to a CustomerDto
-        /// </summary>
-        private CustomerDto MapToCustomerDto(Customer customer)
-        {
-            return new CustomerDto
-            {
-                Id = customer.Id,
-                Name = customer.Name
-            };
         }
     }
 }

@@ -44,18 +44,17 @@ namespace bet_fred.Services
 
         private async Task EvaluateThresholdsAsync()
         {
-            // Create a scope to resolve scoped services
             using var scope = _serviceProvider.CreateScope();
             try
             {
-                var evaluator = scope.ServiceProvider.GetRequiredService<IThresholdEvaluator>();
-                var alerts = await evaluator.EvaluateThresholdsAsync();
+                var evaluator = scope.ServiceProvider.GetRequiredService<ThresholdEvaluator>();
+                var alerts = await evaluator.EvaluateAllThresholdsAsync();
 
-                _logger.LogInformation("Generated {AlertCount} alerts during scheduled evaluation", alerts.Count());
+                _logger.LogInformation("Generated {AlertCount} alerts during scheduled evaluation", alerts.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error resolving services for threshold evaluation");
+                _logger.LogError(ex, "Error evaluating thresholds");
             }
         }
     }

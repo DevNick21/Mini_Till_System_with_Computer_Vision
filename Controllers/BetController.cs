@@ -1,9 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using AutoMapper;
+using bet_fred.Data;
 using bet_fred.Services;
 using bet_fred.Models;
 using bet_fred.DTOs;
-using System.Linq;
-using System.Text;
 
 namespace bet_fred.Controllers
 {
@@ -11,22 +12,28 @@ namespace bet_fred.Controllers
     [Route("api/[controller]")]
     public class BetController : ControllerBase
     {
-        private readonly IDataService _dataService;
-        private readonly IClassificationService _classificationService;
-        private readonly IThresholdEvaluator _thresholdEvaluator;
+        private readonly ApplicationDbContext _context;
+        private readonly ClassificationService _classificationService;
+        private readonly ThresholdEvaluator _thresholdEvaluator;
+        private readonly IMapper _mapper;
         private readonly ILogger<BetController> _logger;
-        // MVP: remove background queue and SSE notifier
+        private readonly IDataService _dataService;
 
         public BetController(
-            IDataService dataService,
-            IClassificationService classificationService,
-            IThresholdEvaluator thresholdEvaluator,
-            ILogger<BetController> logger)
+            ApplicationDbContext context,
+            ClassificationService classificationService,
+            ThresholdEvaluator thresholdEvaluator,
+            IMapper mapper,
+            ILogger<BetController> logger,
+            IDataService dataService)
         {
-            _dataService = dataService;
+            _context = context;
             _classificationService = classificationService;
+
             _thresholdEvaluator = thresholdEvaluator;
+            _mapper = mapper;
             _logger = logger;
+            _dataService = dataService;
         }
 
         [HttpGet]
@@ -34,14 +41,37 @@ namespace bet_fred.Controllers
         {
             try
             {
-                var bets = await _dataService.GetBetRecordsAsync();
-                var betDtos = bets.Select(b => MapToBetRecordDto(b)).ToList();
-                return Ok(betDtos);
+                var bets = await _context.BetRecords
+                    .Include(b => b.Customer)
+                    .OrderByDescending(b => b.PlacedAt)
+                    .ToListAsync();
+
+                return Ok(_mapper.Map<IEnumerable<BetRecordDto>>(bets));
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting bet records");
                 return StatusCode(500, "Error retrieving bet records");
+            }
+        }
+
+        [HttpGet("recent")]
+        public async Task<ActionResult<IEnumerable<BetRecordDto>>> GetRecentBets()
+        {
+            try
+            {
+                var recentBets = await _context.BetRecords
+                    .Include(b => b.Customer)
+                    .OrderByDescending(b => b.PlacedAt)
+                    .Take(20)
+                    .ToListAsync();
+
+                return Ok(_mapper.Map<IEnumerable<BetRecordDto>>(recentBets));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting recent bets");
+                return StatusCode(500, "Error retrieving recent bets");
             }
         }
 
@@ -108,18 +138,23 @@ namespace bet_fred.Controllers
 
             try
             {
-                // First create a new bet record and store the image
+                using var memoryStream = new MemoryStream();
+                await file.CopyToAsync(memoryStream);
+                var imageData = memoryStream.ToArray();
+
+                decimal finalAmount = amount ?? 0;
+
+                // Rely on provided amount or default to 0
+
+                // Create a new bet record
                 var newBet = new BetRecord
                 {
-                    Amount = amount ?? 0, // Amount provided at upload time (stake)
+                    Amount = finalAmount, // Amount from form
                     PlacedAt = DateTime.UtcNow,
                     CustomerId = customerId
                 };
 
                 var createdBet = await _dataService.CreateBetRecordAsync(newBet);
-                using var memoryStream = new MemoryStream();
-                await file.CopyToAsync(memoryStream);
-                var imageData = memoryStream.ToArray();
 
                 // Persist the slip image to the bet record
                 var stored = await _dataService.UploadSlipAsync(createdBet.Id, imageData);
@@ -132,18 +167,32 @@ namespace bet_fred.Controllers
                 if (await _classificationService.IsServiceHealthyAsync())
                 {
                     var (writerId, confidence) = await _classificationService.ClassifyHandwritingAsync(imageData, createdBet.Id);
-                    if (writerId != null && confidence.HasValue)
+                    if (writerId > 0 && confidence > 0.0)
                     {
-                        await _dataService.UpdateBetClassificationAsync(createdBet.Id, writerId, confidence.Value);
-                        // Re-fetch to return updated values
-                        var bets = await _dataService.GetBetRecordsAsync();
-                        var bet = bets.FirstOrDefault(b => b.Id == createdBet.Id);
-                        return Ok(MapToBetRecordDto(bet ?? createdBet));
+                        await _dataService.UpdateBetClassificationAsync(createdBet.Id, writerId.ToString(), confidence);
+                        
+                        // Check if this writer is already linked to a customer
+                        var existingCustomerBet = await _context.BetRecords
+                            .Where(b => b.WriterClassification == writerId.ToString() && b.CustomerId != null)
+                            .FirstOrDefaultAsync();
+                        
+                        if (existingCustomerBet != null)
+                        {
+                            // Link this bet to the same customer (without triggering threshold eval)
+                            createdBet.CustomerId = existingCustomerBet.CustomerId;
+                            await _context.SaveChangesAsync();
+                        }
                     }
                 }
 
-                // If classification failed, return the created bet as-is
-                return Ok(MapToBetRecordDto(createdBet));
+                // Always evaluate thresholds for bets with writer classification
+                var finalBet = await _dataService.GetBetByIdAsync(createdBet.Id);
+                if (finalBet != null && !string.IsNullOrWhiteSpace(finalBet.WriterClassification))
+                {
+                    await _thresholdEvaluator.ProcessBetForThresholdsAsync(finalBet);
+                }
+
+                return Ok(MapToBetRecordDto(finalBet ?? createdBet));
             }
             catch (Exception ex)
             {
@@ -174,13 +223,14 @@ namespace bet_fred.Controllers
                 if (updateDto.CustomerId.HasValue)
                     existingBet.CustomerId = updateDto.CustomerId;
 
-                if (updateDto.WriterClassification != null)
-                    existingBet.WriterClassification = updateDto.WriterClassification;
-
-                if (updateDto.ClassificationConfidence.HasValue)
-                    existingBet.ClassificationConfidence = updateDto.ClassificationConfidence;
-
                 var updatedBet = await _dataService.UpdateBetAsync(existingBet);
+
+                // Handle classification updates separately
+                if (updateDto.WriterClassification != null && updateDto.ClassificationConfidence.HasValue)
+                {
+                    await _dataService.UpdateBetClassificationAsync(id, updateDto.WriterClassification, updateDto.ClassificationConfidence.Value);
+                    updatedBet = await _dataService.GetBetByIdAsync(id); // Re-fetch to get updated values
+                }
 
                 if (updatedBet == null)
                     return NotFound();
@@ -215,24 +265,45 @@ namespace bet_fred.Controllers
                 if (!await _dataService.UploadSlipAsync(id, imageData))
                     return BadRequest("Failed to upload slip - bet may not exist or already has image");
 
+                // Image uploaded; no automatic amount extraction
+
                 // Check if CV service is healthy before classification
                 if (await _classificationService.IsServiceHealthyAsync())
                 {
                     // Trigger CV service classification
                     var (writerId, confidence) = await _classificationService.ClassifyHandwritingAsync(imageData, id);
 
-                    if (writerId != null && confidence.HasValue)
+                    if (writerId > 0 && confidence > 0.0)
                     {
                         // Update bet record with classification results
-                        await _dataService.UpdateBetClassificationAsync(id, writerId, confidence.Value);
+                        await _dataService.UpdateBetClassificationAsync(id, writerId.ToString(), confidence);
+
+                        // Check if this writer is already linked to a customer
+                        var existingCustomerBet = await _context.BetRecords
+                            .Where(b => b.WriterClassification == writerId.ToString() && b.CustomerId != null)
+                            .FirstOrDefaultAsync();
+                        
+                        if (existingCustomerBet != null)
+                        {
+                            // Link this bet to the same customer (direct update to avoid recursion)
+                            var betToUpdate = await _context.BetRecords.FindAsync(id);
+                            if (betToUpdate != null)
+                            {
+                                betToUpdate.CustomerId = existingCustomerBet.CustomerId;
+                                await _context.SaveChangesAsync();
+                            }
+                        }
 
                         // Get the updated bet record for threshold evaluation
                         var bet = await _dataService.GetBetByIdAsync(id);
-                        if (bet != null && bet.CustomerId.HasValue)
+                        if (bet != null && !string.IsNullOrWhiteSpace(bet.WriterClassification))
                         {
                             // Evaluate thresholds after classification
                             await _thresholdEvaluator.ProcessBetForThresholdsAsync(bet);
-
+                        }
+                        
+                        if (bet != null)
+                        {
                             return Ok(MapToBetRecordDto(bet));
                         }
                     }
@@ -262,22 +333,6 @@ namespace bet_fred.Controllers
             }
         }
 
-        [HttpGet("recent")]
-        public async Task<ActionResult<IEnumerable<BetRecordDto>>> GetRecentBets()
-        {
-            try
-            {
-                var allBets = await _dataService.GetBetRecordsAsync();
-                var recentBets = allBets.OrderByDescending(b => b.PlacedAt).Take(10).ToList();
-                var recentDtos = recentBets.Select(b => MapToBetRecordDto(b)).ToList();
-                return Ok(recentDtos);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting recent bet records");
-                return StatusCode(500, "Error retrieving recent bet records");
-            }
-        }
 
         [HttpGet("{id}/slip-image")]
         public async Task<ActionResult> GetSlipImage(int id)
@@ -330,7 +385,7 @@ namespace bet_fred.Controllers
                 WriterClassification = betRecord.WriterClassification,
                 ClassificationConfidence = betRecord.ClassificationConfidence,
                 CustomerId = betRecord.CustomerId,
-                // CustomerName removed from DTO
+                CustomerName = betRecord.Customer?.Name
             };
         }
 

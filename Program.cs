@@ -1,7 +1,6 @@
 using bet_fred.Data;
 using bet_fred.Services;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.SpaServices.ReactDevelopmentServer;
 using Serilog;
 
 namespace bet_fred
@@ -23,19 +22,29 @@ namespace bet_fred
             builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=betfred.db"));
 
-            // Register services (lean MVP)
+            // Add AutoMapper
+            builder.Services.AddAutoMapper(typeof(Program));
+
+            // Register simplified services
             builder.Services.AddScoped<IDataService, DataService>();
-            builder.Services.AddScoped<IThresholdEvaluator, ThresholdEvaluator>();
+            builder.Services.AddScoped<ThresholdEvaluator>();
+            builder.Services.AddHttpClient<ClassificationService>();
+            // OCR service removed
 
-            // Register HttpClient for CV service
-            builder.Services.AddHttpClient<IClassificationService, ClassificationService>();
+            // Background service for threshold monitoring
+            builder.Services.AddHostedService<ThresholdHostedService>();
 
-            // ThresholdHostedService disabled for MVP
-
-            // Classification API base URL defaults in service when not configured
-
-            // Add API controllers
-            builder.Services.AddControllers();
+            // Add API controllers with JSON configuration
+            builder.Services.AddControllers()
+                .AddJsonOptions(options =>
+                {
+                    // Prevent circular references in JSON serialization
+                    options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+                    options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+                });
+            
+            // Minimal built-in health checks
+            builder.Services.AddHealthChecks();
 
             // Add CORS to allow the React app to make API requests
             builder.Services.AddCors(options =>
@@ -86,6 +95,11 @@ namespace bet_fred
 
             // Map API controllers
             app.MapControllers();
+
+            // Health endpoints (simple, no custom controller)
+            app.MapHealthChecks("/health");
+            // Back-compat for previous route used by HealthController
+            app.MapHealthChecks("/api/health");
 
             // For development, just serve static files if they exist, otherwise return 404
             // The React dev server should run separately on port 3000

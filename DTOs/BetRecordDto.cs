@@ -27,6 +27,11 @@ namespace bet_fred.DTOs
 
         // Associated customer information (if available)
         public int? CustomerId { get; set; }
+        
+        /// <summary>
+        /// Customer name for display purposes
+        /// </summary>
+        public string? CustomerName { get; set; }
     }
 
     /// <summary>
@@ -59,11 +64,4 @@ namespace bet_fred.DTOs
         public double? ClassificationConfidence { get; set; }
     }
 
-    /// <summary>
-    /// DTO for uploading a bet slip image for classification
-    /// </summary>
-    public class UploadBetSlipDto
-    {
-        // Removed; creation requires image via CreateBetRecordDto
-    }
 }

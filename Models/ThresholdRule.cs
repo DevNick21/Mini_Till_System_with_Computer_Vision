@@ -33,10 +33,5 @@ namespace bet_fred.Models
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-        /// <summary>
-        /// Type of threshold rule (DailyStake, DailyLoss, DailyBetCount, etc.)
-        /// </summary>
-        // [StringLength(50)]
-        // public string RuleType { get; set; } = string.Empty;
     }
 }

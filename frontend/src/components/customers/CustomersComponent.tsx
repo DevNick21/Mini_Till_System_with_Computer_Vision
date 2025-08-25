@@ -1,97 +1,37 @@
-import React, { useState, useEffect } from 'react';
-import { Table, Badge, Form, InputGroup, Card } from 'react-bootstrap';
-import { apiService } from '../../services/api';
+import React, { useEffect, useCallback } from 'react';
+import DataTable, { Column } from '../shared/DataTable';
+import { api } from '../../services/api';
 import { Customer } from '../../types';
+import { useAsyncOperation } from '../../hooks/useAsyncOperation';
+import LoadingState from '../shared/LoadingState';
 
 const CustomersComponent: React.FC = () => {
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
-
-  useEffect(() => {
-    loadCustomers();
-  }, []);
-
-  const loadCustomers = async () => {
-    try {
-      setLoading(true);
-      const data = await apiService.getCustomers();
-      setCustomers(data);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error loading customers:', error);
-      setLoading(false);
-    }
-  };
-
-  // Tagging functionality removed pending backend support
-
-  const filteredCustomers = customers.filter(customer => 
-    customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    customer.phone.includes(searchTerm)
+  const getCustomers = useCallback(() => api.getCustomers(), []);
+  
+  const { data: customers, loading, error, execute } = useAsyncOperation(
+    getCustomers,
+    'loading customers'
   );
 
-  return (
-    <div className="container mt-4">
-      <h2>Customers Management</h2>
-      
-      <Card className="mb-4">
-        <Card.Body>
-          <InputGroup className="mb-3">
-            <InputGroup.Text>
-              <i className="bi bi-search"></i>
-            </InputGroup.Text>
-            <Form.Control
-              placeholder="Search customers..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </InputGroup>
+  useEffect(() => {
+    execute();
+  }, [execute]);
 
-          <Table responsive hover>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Risk Level</th>
-                {/* Tagging/status removed (no backend support) */}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={7} className="text-center">Loading...</td>
-                </tr>
-              ) : filteredCustomers.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center">No customers found</td>
-                </tr>
-              ) : (
-                filteredCustomers.map(customer => (
-                  <tr key={customer.id}>
-                    <td>{customer.id}</td>
-                    <td>{customer.name}</td>
-                    <td>{customer.email}</td>
-                    <td>{customer.phone}</td>
-                    <td>
-                      <Badge bg={
-                        customer.riskLevel === 'High' ? 'danger' :
-                        customer.riskLevel === 'Medium' ? 'warning' : 'success'
-                      }>
-                        {customer.riskLevel}
-                      </Badge>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </Table>
-        </Card.Body>
-      </Card>
-    </div>
+  const columns: Column<Customer>[] = [
+    { key: 'id', header: 'ID' },
+    { key: 'name', header: 'Name' }
+  ];
+
+  if (loading) return <LoadingState message="Loading customers..." />;
+  if (error) return <div className="alert alert-danger">Error: {error}</div>;
+
+  return (
+    <DataTable
+      data={customers || []}
+      columns={columns}
+      loading={false}
+      title="Customers Management"
+    />
   );
 };
 

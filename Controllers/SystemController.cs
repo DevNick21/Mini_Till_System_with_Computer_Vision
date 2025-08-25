@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using bet_fred.Services;
+using bet_fred.Models;
+using bet_fred.Data;
 
 namespace bet_fred.Controllers
 {
@@ -8,11 +10,15 @@ namespace bet_fred.Controllers
     public class SystemController : ControllerBase
     {
         private readonly IDataService _dataService;
+        private readonly ThresholdEvaluator _thresholdEvaluator;
+        private readonly ApplicationDbContext _context;
         private readonly ILogger<SystemController> _logger;
 
-        public SystemController(IDataService dataService, ILogger<SystemController> logger)
+        public SystemController(IDataService dataService, ThresholdEvaluator thresholdEvaluator, ApplicationDbContext context, ILogger<SystemController> logger)
         {
             _dataService = dataService;
+            _thresholdEvaluator = thresholdEvaluator;
+            _context = context;
             _logger = logger;
         }
 
@@ -88,6 +94,46 @@ namespace bet_fred.Controllers
             {
                 _logger.LogError(ex, "Error getting alerts");
                 return StatusCode(500, "An error occurred while retrieving alerts");
+            }
+        }
+
+        [HttpPost("evaluate-thresholds")]
+        public async Task<ActionResult<string>> EvaluateThresholds()
+        {
+            try
+            {
+                var alerts = await _thresholdEvaluator.EvaluateAllThresholdsAsync();
+                return Ok($"Generated {alerts.Count} alerts");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error evaluating thresholds");
+                return StatusCode(500, "An error occurred while evaluating thresholds");
+            }
+        }
+
+        [HttpPost("create-test-alert")]
+        public async Task<ActionResult<string>> CreateTestAlert()
+        {
+            try
+            {
+                var testAlert = new Alert
+                {
+                    AlertType = "TestAlert",
+                    Message = "This is a test alert to verify the alert system is working",
+                    CreatedAt = DateTime.UtcNow,
+                    IsResolved = false
+                };
+
+                _context.Alerts.Add(testAlert);
+                await _context.SaveChangesAsync();
+
+                return Ok("Test alert created successfully");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating test alert");
+                return StatusCode(500, "An error occurred while creating test alert");
             }
         }
     }

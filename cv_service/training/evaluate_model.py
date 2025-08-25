@@ -3,11 +3,16 @@ Detailed evaluation of the trained handwriting classifier.
 """
 
 import matplotlib.pyplot as plt
-from ..config import *  # noqa: F401,F403
-from ..models import EfficientNetClassifier
 import os
+import sys
 import json
-from collections import defaultdict, Counter
+from collections import defaultdict
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config import *
+from models import EfficientNetClassifier
 
 import cv2
 import numpy as np
@@ -92,25 +97,10 @@ def evaluate_model_detailed():
     split_val = os.path.join(base_dir, "dataset_splits", "val")
     eval_dir = split_val if os.path.isdir(split_val) else SLIPS_DIR
 
-    base_name, _ = os.path.splitext(BEST_MODEL_NAME)
-    sidecar_path = os.path.join(MODEL_SAVE_PATH, f"{base_name}.labels.json")
-    class_order = None
-    if os.path.exists(sidecar_path):
-        try:
-            with open(sidecar_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-            if isinstance(payload, dict) and isinstance(payload.get("all_writers"), list):
-                class_order = payload["all_writers"]
-                print(
-                    f"Loaded class order from sidecar ({len(class_order)} classes)")
-        except Exception as e:
-            print(f"Warning: failed to read labels sidecar: {e}")
-    if class_order is None:
-        discovered = [d for d in os.listdir(
-            eval_dir) if os.path.isdir(os.path.join(eval_dir, d))]
-        class_order = sorted(discovered) if discovered else list(ALL_WRITERS)
-        print(
-            f"Using discovered/config class order ({len(class_order)} classes)")
+    discovered = [d for d in os.listdir(
+        eval_dir) if os.path.isdir(os.path.join(eval_dir, d))]
+    class_order = sorted(discovered) if discovered else list(ALL_WRITERS)
+    print(f"Using discovered/config class order ({len(class_order)} classes)")
 
     weights_path = os.path.join(MODEL_SAVE_PATH, BEST_MODEL_NAME)
     model = load_trained_model(weights_path, class_order, device)
@@ -201,22 +191,21 @@ def evaluate_model_detailed():
             print(f"  {writer:6s}: No samples found")
 
     print(f"\n=== CONFIDENCE ANALYSIS ===")
-    high_conf = sum(1 for c in all_confidences if c >=
-                    HIGH_CONFIDENCE_THRESHOLD)
-    med_conf = sum(1 for c in all_confidences if MEDIUM_CONFIDENCE_THRESHOLD <=
-                   c < HIGH_CONFIDENCE_THRESHOLD)
+    high_conf = sum(1 for c in all_confidences if c >= 0.9)
+    med_conf = sum(
+        1 for c in all_confidences if MEDIUM_CONFIDENCE_THRESHOLD <= c < 0.9)
     low_conf = sum(1 for c in all_confidences if c <
                    MEDIUM_CONFIDENCE_THRESHOLD)
 
     print(
-        f"High confidence (>={HIGH_CONFIDENCE_THRESHOLD}): {high_conf:3d} ({high_conf/len(all_confidences)*100:.1f}%)")
+        f"High confidence (>=0.9): {high_conf:3d} ({high_conf/len(all_confidences)*100:.1f}%)")
     print(
         f"Med confidence (>={MEDIUM_CONFIDENCE_THRESHOLD}): {med_conf:3d} ({med_conf/len(all_confidences)*100:.1f}%)")
     print(
         f"Low confidence (<{MEDIUM_CONFIDENCE_THRESHOLD}): {low_conf:3d} ({low_conf/len(all_confidences)*100:.1f}%)")
 
     high_conf_correct = sum(
-        1 for detail in prediction_details if detail['confidence'] >= HIGH_CONFIDENCE_THRESHOLD and detail['correct'])
+        1 for detail in prediction_details if detail['confidence'] >= 0.9 and detail['correct'])
     high_conf_accuracy = high_conf_correct / high_conf if high_conf > 0 else 0
 
     print(
@@ -340,10 +329,10 @@ def generate_betfred_visualizations(all_labels, all_predictions, all_confidences
         save_dir, "efficientnet_confidence_histogram_betfred.png"), dpi=300)
     plt.close()
 
-    conf_cat = ['High' if c >= HIGH_CONFIDENCE_THRESHOLD else 'Medium' if c >=
+    conf_cat = ['High' if c >= 0.9 else 'Medium' if c >=
                 MEDIUM_CONFIDENCE_THRESHOLD else 'Low' for c in all_confidences]
-    from collections import Counter as _Counter
-    cat_counts = _Counter(conf_cat)
+    from collections import Counter
+    cat_counts = Counter(conf_cat)
     plt.figure(figsize=(5, 5))
     bar_palette = [BETFRED_BLUE if cat == "High" else BETFRED_RED if cat ==
                    "Low" else "#888888" for cat in cat_counts.keys()]

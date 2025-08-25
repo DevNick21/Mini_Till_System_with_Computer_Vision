@@ -1,52 +1,45 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Form, Button, Card, Alert, Spinner, Toast, ToastContainer, Collapse, ProgressBar } from 'react-bootstrap';
-import { apiService, ocrService } from '../../services/api';
-import { BetRecord } from '../../types';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { Form, Button, Card, Alert, Spinner, Toast, ToastContainer } from 'react-bootstrap';
+import { api } from '../../services/api';
+import { useToast } from '../../hooks/useToast';
+import { useAsyncOperation } from '../../hooks/useAsyncOperation';
+import { handleApiError } from '../../utils/errorHandler';
+import RecentBetsList from '../shared/RecentBetsList';
 
 const UploadComponent: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [errorDetails, setErrorDetails] = useState<string | null>(null);
-  const [betData, setBetData] = useState<Partial<BetRecord>>({
-    amount: 0
-  });
-  const [suggestionMethod, setSuggestionMethod] = useState<string | null>(null);
-  const [suggestionId, setSuggestionId] = useState<number | null>(null);
-  const [recentBets, setRecentBets] = useState<BetRecord[]>([]);
-  const [loadingRecent, setLoadingRecent] = useState(false);
-  interface ToastItem { id: number; message: string; variant: 'success' | 'danger' | 'info' | 'info-progress'; retry?: () => void; progress?: number; inProgress?: boolean; }
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const pushToast = useCallback((t: Omit<ToastItem, 'id'>) => {
-    setToasts(prev => [...prev, { id: Date.now() + Math.random(), ...t }]);
-  }, []);
-  const removeToast = (id: number) => setToasts(prev => prev.filter(t => t.id !== id));
-  const [showErrorDetails, setShowErrorDetails] = useState(false);
+  const [amount, setAmount] = useState<number>(0);
+
+  const { toasts, addToast, removeToast, addProgressToast, updateProgress, completeProgressToast } = useToast();
+  
+  const getRecentBets = useCallback(() => api.getRecentBets(), []);
+  
+  const { 
+    data: recentBets, 
+    loading: loadingRecent, 
+    execute: loadRecentBets 
+  } = useAsyncOperation(
+    getRecentBets,
+    'loading recent bets'
+  );
+
+  const lastFetchRef = useRef<number>(0);
 
   useEffect(() => {
     loadRecentBets();
-  // SSE removed; rely on refresh after upload and manual refresh
-  }, []);
+  }, [loadRecentBets]);
 
-  const lastFetchRef = useRef<number>(0);
-  const loadRecentBets = async () => {
+  const throttledLoadRecentBets = async () => {
     const now = Date.now();
-    if (now - lastFetchRef.current < 3000) { // throttle to 1 call per 3s
+    if (now - lastFetchRef.current < 3000) {
       console.debug('[RecentBets] Throttled duplicate fetch');
       return;
     }
     lastFetchRef.current = now;
-    try {
-      console.debug('[RecentBets] Fetching recent bets');
-      setLoadingRecent(true);
-      const bets = await apiService.getRecentBets();
-      setRecentBets(bets);
-    } catch (err) {
-      console.error('Error loading recent bets:', err);
-    } finally {
-      setLoadingRecent(false);
-    }
+    await loadRecentBets();
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -61,40 +54,6 @@ const UploadComponent: React.FC = () => {
         }
       };
       reader.readAsDataURL(selectedFile);
-      // Fire-and-forget: get suggested stake from OCR service
-      (async () => {
-        try {
-          const res = await ocrService.suggestStake(selectedFile);
-          if (res && typeof res.stake === 'number') {
-            setSuggestionMethod(res.method || null);
-            // Prefill but let user override
-            setBetData(prev => ({ ...prev, amount: Number(res.stake) }));
-            pushToast({ message: `Suggested stake: ${res.stake.toFixed(2)}${res.currency ? ' ' + res.currency : ''}`, variant: 'info' });
-            // Log suggestion for audit
-            try {
-              const logged = await ocrService.logSuggestion({
-                fileName: selectedFile.name,
-                fileSize: selectedFile.size,
-                stake: Number(res.stake),
-                currency: res.currency || null,
-                method: res.method || null
-              });
-              if (logged?.id) setSuggestionId(logged.id);
-            } catch (e) {
-              console.warn('Failed to log OCR suggestion', e);
-            }
-          } else {
-            setSuggestionMethod(null);
-            setSuggestionId(null);
-          }
-        } catch (err) {
-          // non-fatal; user can type manually
-          setSuggestionMethod(null);
-          setSuggestionId(null);
-          console.warn('OCR suggestion failed:', err);
-        }
-      })();
-  // removed uploadSuccess state
     }
   };
 
@@ -111,36 +70,6 @@ const UploadComponent: React.FC = () => {
         }
       };
       reader.readAsDataURL(droppedFile);
-      (async () => {
-        try {
-          const res = await ocrService.suggestStake(droppedFile);
-          if (res && typeof res.stake === 'number') {
-            setSuggestionMethod(res.method || null);
-            setBetData(prev => ({ ...prev, amount: Number(res.stake) }));
-            pushToast({ message: `Suggested stake: ${res.stake.toFixed(2)}${res.currency ? ' ' + res.currency : ''}`, variant: 'info' });
-            try {
-              const logged = await ocrService.logSuggestion({
-                fileName: droppedFile.name,
-                fileSize: droppedFile.size,
-                stake: Number(res.stake),
-                currency: res.currency || null,
-                method: res.method || null
-              });
-              if (logged?.id) setSuggestionId(logged.id);
-            } catch (e) {
-              console.warn('Failed to log OCR suggestion', e);
-            }
-          } else {
-            setSuggestionMethod(null);
-            setSuggestionId(null);
-          }
-        } catch (err) {
-          setSuggestionMethod(null);
-          setSuggestionId(null);
-          console.warn('OCR suggestion failed:', err);
-        }
-      })();
-  // removed uploadSuccess state
     }
   };
 
@@ -148,17 +77,8 @@ const UploadComponent: React.FC = () => {
     e.preventDefault();
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setBetData(prev => ({
-      ...prev,
-      [name]: name === 'amount' ? parseFloat(value) : value
-    }));
-    if (name === 'amount') {
-      // User typing overrides the suggestion
-      setSuggestionMethod(null);
-  setSuggestionId(null);
-    }
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setAmount(parseFloat(e.target.value) || 0);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -169,61 +89,41 @@ const UploadComponent: React.FC = () => {
     }
 
     try {
-  setUploading(true);
+      setUploading(true);
       setError(null);
-      setErrorDetails(null);
-      // Upload image along with stake (amount); backend will create the bet and return the created bet (or its id)
-      // Create an in-progress toast
-      let progressToastId = Date.now() + Math.random();
-      setToasts(prev => [...prev, { id: progressToastId, message: 'Uploading bet slip...', variant: 'info-progress', progress: 0, inProgress: true }]);
 
-  await apiService.uploadBetImage(file, betData.amount, undefined, (pct: number) => {
-        setToasts(prev => prev.map(t => t.id === progressToastId ? { ...t, progress: pct } : t));
+      const progressToastId = addProgressToast('Uploading bet slip...');
+
+      await api.uploadBet(file, amount, undefined, (progress: number) => {
+        updateProgress(progressToastId, progress);
       });
 
-      setUploading(false);
-      // Mark progress toast complete then replace with success
-  setToasts(prev => prev.map(t => t.id === progressToastId ? { ...t, progress: 100, inProgress: false, message: 'Queued for background classification...', variant: 'info-progress' } : t));
-      // Brief delay to show 100% before success
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== progressToastId));
-        pushToast({ message: 'Bet uploaded (classification will appear shortly)', variant: 'success' });
-      }, 600);
+      completeProgressToast(progressToastId, 'Bet uploaded successfully');
+      addToast({ message: 'Bet uploaded (classification will appear shortly)', variant: 'success' });
+
+      // Reset form
       setFile(null);
       setPreview(null);
-  setBetData({ amount: 0 });
+      setAmount(0);
 
-  // Refresh recent bets after successful upload
-      await loadRecentBets();
-      // Schedule a delayed refresh to pick up classification result from background worker
-      setTimeout(() => { loadRecentBets(); }, 4000);
+      // Refresh recent bets only
+      await throttledLoadRecentBets();
+      setTimeout(() => throttledLoadRecentBets(), 4000);
+
     } catch (err) {
-      setUploading(false);
-      let baseMsg = 'Error uploading bet.';
-      let detail: string | null = null;
-      if (err && typeof err === 'object') {
-        const anyErr: any = err;
-        if (anyErr.response) {
-          const status = anyErr.response.status;
-            const respData = typeof anyErr.response.data === 'string' ? anyErr.response.data : JSON.stringify(anyErr.response.data);
-          detail = `Status ${status}${respData ? ' - ' + respData : ''}`;
-        } else if (anyErr.message) {
-          detail = anyErr.message;
-        }
-      }
-      setError(baseMsg);
-      setErrorDetails(detail);
-  pushToast({
-        message: detail ? `${baseMsg} ${detail}` : baseMsg,
+      const errorMessage = handleApiError(err, 'uploading bet');
+      setError(errorMessage);
+      addToast({
+        message: errorMessage,
         variant: 'danger',
         retry: () => {
           if (file && !uploading) {
-            const fakeEvt = { preventDefault: () => {} } as unknown as React.FormEvent;
-            handleSubmit(fakeEvt);
+            handleSubmit({ preventDefault: () => {} } as React.FormEvent);
           }
         }
       });
-      console.error('Error:', err);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -231,9 +131,7 @@ const UploadComponent: React.FC = () => {
     setFile(null);
     setPreview(null);
     setError(null);
-  setBetData({ amount: 0 });
-  setSuggestionMethod(null);
-  setSuggestionId(null);
+    setAmount(0);
   };
 
   return (
@@ -244,17 +142,6 @@ const UploadComponent: React.FC = () => {
         <Alert variant="danger" dismissible onClose={() => setError(null)}>
           {error}
         </Alert>
-      )}
-
-      {error && errorDetails && (
-        <div className="mb-2">
-          <Button variant="link" size="sm" className="p-0" onClick={() => setShowErrorDetails(s => !s)}>
-            {showErrorDetails ? 'Hide details' : 'Show details'}
-          </Button>
-          <Collapse in={showErrorDetails}>
-            <div className="mt-1 small text-muted preserve-whitespace">{errorDetails}</div>
-          </Collapse>
-        </div>
       )}
 
       <div className="row">
@@ -276,14 +163,18 @@ const UploadComponent: React.FC = () => {
                   accept="image/*"
                   onChange={handleFileChange}
                   className="d-none"
-                  title="Select bet slip image"
-                  placeholder="Select bet slip image"
+                  aria-label="Select bet slip image file"
                 />
               </div>
 
               {preview && (
                 <div className="text-center">
-                  <img src={preview} alt="Preview" className="img-fluid mb-3 upload-preview-img" />
+                  <img 
+                    src={preview} 
+                    alt="Preview" 
+                    className="img-fluid mb-3" 
+                    style={{maxWidth: '300px', maxHeight: '300px'}} 
+                  />
                   <div>
                     <Button variant="outline-danger" size="sm" onClick={clearForm} className="me-2">
                       Clear
@@ -303,34 +194,14 @@ const UploadComponent: React.FC = () => {
                     <Form.Control
                       type="number"
                       name="amount"
-                      value={betData.amount}
-                      onChange={handleInputChange}
-                      onKeyDown={(ev: React.KeyboardEvent<HTMLInputElement>) => {
-                        if (ev.key === 'Enter') {
-                          // Accept current value and submit
-                          const form = ev.currentTarget.form;
-                          if (form) {
-                            ev.preventDefault();
-                            // If a suggestion exists, mark it accepted
-                            if (suggestionId) {
-                              ocrService.acceptSuggestion(suggestionId).catch(() => {/* no-op */});
-                              setSuggestionId(null);
-                            }
-                            form.requestSubmit();
-                          }
-                        }
-                      }}
+                      value={amount}
+                      onChange={handleAmountChange}
                       step="0.01"
                       min="0"
                       inputMode="decimal"
                       required
                     />
-                    {suggestionMethod && (
-                      <div className="form-text">Suggested via {suggestionMethod}. Press Enter to accept and submit, or type to overwrite.</div>
-                    )}
                   </Form.Group>
-
-                  {/* Date is managed by backend (PlacedAt) and shown in recent list */}
 
                   <div className="d-grid">
                     <Button type="submit" variant="primary" disabled={uploading}>
@@ -351,40 +222,14 @@ const UploadComponent: React.FC = () => {
         </div>
 
         <div className="col-md-6">
-          <Card>
-            <Card.Header className="d-flex justify-content-between align-items-center">
-              <span>Recent Bets</span>
-              <Button variant="outline-secondary" size="sm" onClick={loadRecentBets} disabled={loadingRecent}>
-                {loadingRecent ? 'Refreshing...' : 'Refresh'}
-              </Button>
-            </Card.Header>
-            <Card.Body>
-              {recentBets.length === 0 ? (
-                <p className="text-muted">No recent bets found</p>
-              ) : (
-                <div className="list-group">
-                  {recentBets.map(bet => (
-                    <div key={bet.id} className="list-group-item">
-                      <div className="d-flex w-100 justify-content-between">
-                        <h5 className="mb-1">£{bet.amount.toFixed(2)}</h5>
-                        <small>{new Date(bet.placedAt).toLocaleDateString()}</small>
-                      </div>
-                      <p className="mb-1">
-                        <span className="badge bg-info">
-                          {bet.writerClassification && bet.writerClassification !== '0' 
-                            ? `Writer ${bet.writerClassification}` 
-                            : 'Not classified'}
-                        </span>
-                      </p>
-                      <small>CustomerId: {bet.customerId ?? 'Unknown'}</small>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card.Body>
-          </Card>
+          <RecentBetsList 
+            bets={recentBets || []}
+            loading={loadingRecent}
+            onRefresh={throttledLoadRecentBets}
+          />
         </div>
       </div>
+
       <ToastContainer position="bottom-end" className="p-3">
         {toasts.map(t => (
           <Toast
@@ -404,7 +249,15 @@ const UploadComponent: React.FC = () => {
                   {t.message}
                   {t.variant === 'info-progress' && (
                     <div className="mt-2">
-                      <ProgressBar now={t.progress || 0} animated={t.inProgress} label={`${t.progress || 0}%`} min={0} max={100} />
+                      <div className="progress">
+                        <div 
+                          className="progress-bar progress-bar-striped progress-bar-animated" 
+                          role="progressbar" 
+                          style={{width: `${t.progress || 0}%`}}
+                        >
+                          {t.progress || 0}%
+                        </div>
+                      </div>
                     </div>
                   )}
                 </span>

@@ -28,27 +28,3 @@ code {
   border-color: #007bff;
   background-color: #e3f2fd;
 }
-
-.image-preview {
-  max-width: 300px;
-  max-height: 300px;
-  margin: 20px auto;
-}
-
-.classification-result {
-  padding: 15px;
-  background-color: #e8f5e8;
-  border-left: 4px solid #28a745;
-  margin-top: 15px;
-}
-
-/* Preserve whitespace for error detail blocks */
-.preserve-whitespace {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* Slight spacing between stacked toasts */
-.toast-container .toast + .toast {
-  margin-top: 0.5rem;
-}

@@ -1,136 +1,127 @@
-# CV Service — EfficientNet Classification
+# cv_service — Writer Classification (EfficientNet-B0)
 
-Key endpoints
+A lightweight microservice for classifying handwriting slips to anonymous writer IDs. It uses EfficientNet‑B0 with a CLAHE‑enabled preprocessing pipeline and exposes a small FastAPI.
 
-- GET /health
-- GET /model-info
-- POST /classify-anonymous
+## Structure
 
-Scripts
+- `config.py` — central config (paths, thresholds, toggles like PREPROCESS_CLAHE)
+- `models/efficientnet_classifier.py` — model definition (EfficientNet‑B0 backbone + classifier head)
+- `core/inference.py` — model load and single‑image classification utilities
+- `classification_api.py` — FastAPI app exposing health, model-info, and classify endpoints
+- `training/`
+  - `data_prep.py` — dataset, transforms (with CLAHE), stratified split, DataLoaders
+  - `train_model.py` — training loop (AdamW, ReduceLROnPlateau, early stop), checkpointing
+- `scripts/` — helpers: de-identify slips, split dataset
+- `trained_models/` — saved weights and labels sidecar
+- `slips/` — training data (by writer folder); or use `dataset_splits/{train,val}`
 
-- Deidentify dataset:
+## Quick start
 
-  python -m cv_service.scripts.deidentify_slips --src-dir cv_service/slips --out-dir cv_service/slips_anon --mapping-file cv_service/slips_deid_mapping.csv
-
-- Stratified split:
-
-  python -m cv_service.scripts.split_dataset --data-dir cv_service/slips_anon --out-dir cv_service/dataset_splits --train 0.7 --val 0.2 --test 0.1 --seed 42
-
-Training
-
-- Entry: python -m cv_service.training.train_model
-- Best model saved to cv_service/trained_models/best_efficientnet_classifier.pth
-- Labels sidecar: cv_service/trained_models/best_efficientnet_classifier.labels.json
-
-Serving
-
-- Start API: python -m classification_api
-- Base URL: <http://localhost:8001/>
-
-A machine learning service to classify handwritten bet slips for safer gambling monitoring.
-
-## Overview
-
-This service provides a REST API for classifying handwritten bet slips to identify individual writers. It uses EfficientNet as the single model, ensuring high accuracy and a simple, robust pipeline.
-
-## Features
-
-- **EfficientNet Classification**: Uses EfficientNet-B0 as the model for optimal accuracy-efficiency balance
-- **REST API**: Easy integration with the .NET application
-- **Confidence Scoring**: Provides confidence levels for each classification
-- **Preprocessing**: Matches training pipeline (resize, grayscale to 3ch, normalize)
-
-
-## Models
-
-The service uses a model hierarchy:
-
-1. **EfficientNet-B0**: Optimized architecture balancing accuracy and computational efficiency
-
-## Installation
-
-### Requirements
-
-- Python 3.8+
-- PyTorch 1.9+
-- FastAPI
-- OpenCV
-- NumPy
-- scikit-learn
-
-### Setup
-
-1. Install dependencies:
+1. Install deps (conda or pip)
 
 ```bash
-pip install -r requirements.txt
+pip install -r cv_service/requirements.txt
 ```
 
-1. Train the models:
+2. Prepare data
+
+- Either place images under `cv_service/slips/<writer>/...`
+- Or create splits via script:
+
+```bash
+python -m cv_service.scripts.split_dataset \
+  --data-dir cv_service/slips \
+  --out-dir cv_service/dataset_splits \
+  --train 0.7 --val 0.3 --seed 42
+```
+
+1. Train
 
 ```bash
 python -m cv_service.training.train_model
 ```
 
-## Usage
+Outputs:
 
-### Start the API
+- Weights: `cv_service/trained_models/best_efficientnet_classifier.pth`
+- Checkpoint: `cv_service/trained_models/best_efficientnet_classifier.ckpt`
+- Labels sidecar: `cv_service/trained_models/best_efficientnet_classifier.labels.json` (key: `all_writers`)
+
+1. Serve API
 
 ```bash
-python -m classification_api
+python -m cv_service.classification_api
 ```
 
-The API will be available at `http://localhost:8001`.
-
-## Key endpoints
-
-- **POST /classify-anonymous**: Classify a single handwritten bet slip
-- **GET /health**: Check API health status
-- **GET /model-info**: Get model information
-
-## Scripts
-
-```python
-import requests, json
-
-url = "http://localhost:8001/classify-anonymous"
-files = {"file": ("123.jpg", open("path/to/slip.jpg", "rb"))}
-response = requests.post(url, files=files)
-print(json.dumps(response.json(), indent=2))
-```
-
-Additional Tools
-
-- **api_diagnostics.py**: Check system status and model availability
+Base URL: <http://localhost:8001>
 
 ## Configuration
 
-Configuration is in a single file: `cv_service/config.py`.
+Edit `cv_service/config.py`:
 
-This includes:
+- `PREPROCESS_CLAHE = True` — enables CLAHE in train/val/inference
+- `IMAGE_SIZE` (default 224)
+- Paths: `SLIPS_DIR`, `MODEL_SAVE_PATH`, filenames
+- Training: `BATCH_SIZE`, `NUM_EPOCHS`, `LEARNING_RATE`, `VAL_SPLIT`, patience
+- Thresholds: `MEDIUM_CONFIDENCE_THRESHOLD`, `HIGH_CONFIDENCE_THRESHOLD`
 
-- Model configuration
-- Path configurations
-- Performance thresholds
-- Model parameters
-- Image sizes
-- File paths
+## API
+
+- GET `/health` — service status, device, model loaded
+- GET `/model-info` — model type, writers, thresholds
+- POST `/classify-anonymous` — form-data `file` image → `{ writerId, confidence }`
+
+Example:
+
+```python
+import requests, json
+r = requests.post(
+    "http://localhost:8001/classify-anonymous",
+    files={"file": ("123.jpg", open("/path/to/slip.jpg", "rb"))},
+)
+print(json.dumps(r.json(), indent=2))
+```
+
+## Model
+
+- Backbone: torchvision EfficientNet‑B0 (with pretrained fallback)
+- Classifier head (restored):
+  - Flatten → Dropout → Linear(1280→512) → ReLU → BatchNorm → Dropout → Linear(512→256) → ReLU → BatchNorm → Dropout → Linear(256→num_writers)
 
 ## Training
 
-To train the models:
+- Optimizer: AdamW (weight‑decay param groups)
+- Scheduler: ReduceLROnPlateau on Val Acc@1
+- Early stop: configurable patience
+- Metrics: Top‑1 Accuracy
+- Checkpointing: saves best weights + `.ckpt` + labels sidecar
+
+To resume (weights only), just keep the `.pth` in `trained_models/` and rerun serving.
+
+## Notes & tips
+
+- Old/new weights compatibility depends on classifier head. With the restored head, older checkpoints should load.
+- If you change the head, bump the model filename to avoid shape mismatch.
+- Keep training/inference transforms aligned (CLAHE + Resize + Grayscale(3ch) + Normalize) to avoid distribution shift.
+- Batch classification has been removed by design; API is single‑image only.
+
+## Scripts
+
+- De‑identify slips:
 
 ```bash
-python -m cv_service.training.train_model
+python -m cv_service.scripts.deidentify_slips \
+  --src-dir cv_service/slips \
+  --out-dir cv_service/slips_anon \
+  --mapping-file cv_service/slips_deid_mapping.csv
 ```
 
-This will:
+- Create dataset splits:
 
-1. Train the EfficientNet model
-2. Evaluate its performance
-3. Save the best model weights and configurations
-
-## Integration
-
-This service is designed to integrate with the .NET application through the ClassificationService component.
+```bash
+python -m cv_service.scripts.split_dataset \
+  --data-dir cv_service/slips_anon \
+  --out-dir cv_service/dataset_splits \
+  --train 0.7 --val 0.3 --test 0.0 --seed 42
+```
 

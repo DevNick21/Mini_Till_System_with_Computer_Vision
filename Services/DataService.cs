@@ -31,11 +31,9 @@ namespace bet_fred.Services
         // DASHBOARD OPERATIONS
         Task<object> GetDashboardStatsAsync();
         Task<IEnumerable<Alert>> GetAlertsAsync();
-
-        // OCR Suggestions
-        Task<OcrSuggestion> CreateOcrSuggestionAsync(OcrSuggestion suggestion);
-        Task<bool> MarkOcrSuggestionAcceptedAsync(int id);
-        Task<OcrSuggestion?> GetOcrSuggestionByIdAsync(int id);
+        Task<Alert?> GetAlertByIdAsync(int id);
+        Task<Alert?> ResolveAlertAsync(int id, string? resolvedBy, string? notes, int? customerId);
+        Task<int> LinkWriterBetsToCustomerAsync(string writerId, int customerId);
     }
 
     public class DataService : IDataService
@@ -250,6 +248,72 @@ namespace bet_fred.Services
             return await _context.Alerts.OrderByDescending(a => a.CreatedAt).ToListAsync();
         }
 
+        public async Task<Alert?> GetAlertByIdAsync(int id)
+        {
+            return await _context.Alerts.FindAsync(id);
+        }
+
+        public async Task<Alert?> ResolveAlertAsync(int id, string? resolvedBy, string? notes, int? customerId)
+        {
+            var alert = await _context.Alerts.FindAsync(id);
+            if (alert == null) return null;
+
+            alert.IsResolved = true;
+            alert.ResolvedAt = DateTime.UtcNow;
+            if (!string.IsNullOrWhiteSpace(resolvedBy)) alert.ResolvedBy = resolvedBy;
+            if (!string.IsNullOrWhiteSpace(notes)) alert.ResolutionNotes = notes;
+
+            if (customerId.HasValue)
+            {
+                var customer = await _context.Customers.FindAsync(customerId.Value);
+                if (customer != null)
+                {
+                    alert.CustomerId = customer.Id;
+                    
+                    // If this is a writer threshold alert, link all bets with this writer to the customer
+                    if (alert.AlertType == "WriterThresholdExceeded")
+                    {
+                        var writerIdMatch = System.Text.RegularExpressions.Regex.Match(alert.Message, @"Writer=(\w+)");
+                        if (writerIdMatch.Success)
+                        {
+                            var writerId = writerIdMatch.Groups[1].Value;
+                            // Link existing bets (this won't trigger new threshold evaluations)
+                            var linkedCount = await LinkWriterBetsToCustomerAsync(writerId, customer.Id);
+                            _logger.LogInformation("Resolved alert {AlertId} and linked {LinkedCount} bets for Writer {WriterId} to Customer {CustomerId}", 
+                                alert.Id, linkedCount, writerId, customer.Id);
+                        }
+                    }
+                }
+            }
+
+            await _context.SaveChangesAsync();
+            return alert;
+        }
+
+        public async Task<int> LinkWriterBetsToCustomerAsync(string writerId, int customerId)
+        {
+            var betsToLink = await _context.BetRecords
+                .Where(b => b.WriterClassification == writerId && b.CustomerId == null)
+                .ToListAsync();
+
+            foreach (var bet in betsToLink)
+            {
+                bet.CustomerId = customerId;
+            }
+
+            var linkedCount = betsToLink.Count;
+            if (linkedCount > 0)
+            {
+                // Save changes without triggering threshold evaluations
+                // (linking historical bets shouldn't create new alerts)
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("Linked {Count} existing bets with Writer {WriterId} to Customer {CustomerId}", 
+                    linkedCount, writerId, customerId);
+            }
+
+            return linkedCount;
+        }
+
         public async Task<BetRecord?> UpdateBetAsync(BetRecord betRecord)
         {
             try
@@ -282,27 +346,7 @@ namespace bet_fred.Services
             }
         }
 
-        public async Task<OcrSuggestion> CreateOcrSuggestionAsync(OcrSuggestion suggestion)
-        {
-            _context.OcrSuggestions.Add(suggestion);
-            await _context.SaveChangesAsync();
-            return suggestion;
-        }
-
-        public async Task<bool> MarkOcrSuggestionAcceptedAsync(int id)
-        {
-            var s = await _context.OcrSuggestions.FindAsync(id);
-            if (s == null) return false;
-            s.Accepted = true;
-            s.AcceptedAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
-            return true;
-        }
-
-        public async Task<OcrSuggestion?> GetOcrSuggestionByIdAsync(int id)
-        {
-            return await _context.OcrSuggestions.FindAsync(id);
-        }
+        // OCR Suggestion methods removed
 
         // Removed dev-only ClearAllBetsAsync to reduce surface area
     }
