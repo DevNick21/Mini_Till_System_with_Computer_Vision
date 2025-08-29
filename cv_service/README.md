@@ -124,4 +124,3 @@ python -m cv_service.scripts.split_dataset \
   --out-dir cv_service/dataset_splits \
   --train 0.7 --val 0.3 --test 0.0 --seed 42
 ```
-

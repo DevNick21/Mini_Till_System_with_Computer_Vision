@@ -9,7 +9,7 @@ This repository contains a full-stack application with three main components:
 ### Backend (.NET 8 Web API)
 
 - **Framework**: ASP.NET Core Web API (net8.0)
-- **Database**: Entity Framework Core with SQLite (code-first approach)
+- **Database**: Entity Framework Core with SQLite
 - **Logging**: Serilog with console and rolling file outputs (`Logs/` directory)
 - **CORS**: Configured for React development server and production builds
 - **Health Checks**: Built-in health monitoring endpoints
@@ -34,6 +34,7 @@ This repository contains a full-stack application with three main components:
 ## Key Features
 
 ### Core Functionality
+
 - **Customer Management**: Full CRUD operations for customer records
 - **Bet Record Management**: Upload and manage betting slips with image processing
 - **Handwriting Classification**: AI-powered writer identification using EfficientNet-B0
@@ -42,12 +43,14 @@ This repository contains a full-stack application with three main components:
 - **Alert System**: Automated notifications for threshold breaches
 
 ### File Upload Support
+
 - **Multiple Formats**: Support for JPEG and PNG image uploads
 - **Upload Methods**: Both base64 encoding and multipart file uploads
 - **File Size Limits**: Configurable maximum file size (10MB default)
 - **Image Processing**: Automatic preprocessing with CLAHE enhancement
 
 ### Data Management
+
 - **SQLite Database**: Lightweight, file-based database with automatic migrations
 - **Entity Framework**: Code-first approach with seamless model updates
 - **Background Processing**: Automated threshold evaluation and alert generation
@@ -56,6 +59,7 @@ This repository contains a full-stack application with three main components:
 ## Technology Stack
 
 ### Backend Technologies
+
 - **.NET 8**: Latest .NET framework with improved performance
 - **ASP.NET Core**: High-performance web API framework
 - **Entity Framework Core**: Modern ORM with SQLite database
@@ -63,6 +67,7 @@ This repository contains a full-stack application with three main components:
 - **Serilog**: Structured logging with file and console outputs
 
 ### Frontend Technologies
+
 - **React 19**: Latest React with concurrent features
 - **TypeScript**: Type-safe JavaScript development
 - **React Bootstrap**: Responsive UI components
@@ -70,6 +75,7 @@ This repository contains a full-stack application with three main components:
 - **Axios**: HTTP client for API communication
 
 ### Machine Learning Stack
+
 - **PyTorch 2.0.1**: Deep learning framework
 - **torchvision**: Computer vision utilities and pre-trained models
 - **OpenCV**: Image processing and computer vision
@@ -167,8 +173,8 @@ dotnet restore
 dotnet run
 ```
 
-- **Development URL**: http://localhost:5113
-- **HTTPS URL**: https://localhost:7183
+- **Development URL**: <http://localhost:5113>
+- **HTTPS URL**: <https://localhost:7183>
 - **Database**: SQLite migrations are applied automatically on startup
 - **Logs**: Available in `Logs/` directory with daily rotation
 
@@ -185,8 +191,8 @@ npm install
 npm start
 ```
 
-- **Development URL**: http://localhost:3000
-- **Proxy Configuration**: Automatically proxies API calls to http://localhost:5113
+- **Development URL**: <http://localhost:3000>
+- **Proxy Configuration**: Automatically proxies API calls to <http://localhost:5113>
 - **Build Command**: `npm run build` for production builds
 
 #### 3. ML Classification Service (Python FastAPI)
@@ -202,14 +208,14 @@ pip install -r requirements.txt
 python classification_api.py
 ```
 
-- **Service URL**: http://localhost:8001
-- **Health Check**: http://localhost:8001/health
-- **API Documentation**: http://localhost:8001/docs (Swagger UI)
+- **Service URL**: <http://localhost:8001>
+- **Health Check**: <http://localhost:8001/health>
+- **API Documentation**: <http://localhost:8001/docs> (Swagger UI)
 
 ### Development Workflow
 
 1. **Start all services** in separate terminal windows
-2. **Access the application** at http://localhost:3000
+2. **Access the application** at <http://localhost:3000>
 3. **Upload betting slips** through the web interface
 4. **Monitor alerts** and threshold breaches in real-time
 5. **View logs** in the `Logs/` directory for debugging
@@ -306,6 +312,7 @@ Backend configuration (`appsettings.json`):
 ### Core Entities
 
 #### Customer
+
 ```csharp
 public class Customer
 {
@@ -317,6 +324,7 @@ public class Customer
 ```
 
 #### BetRecord
+
 ```csharp
 public class BetRecord
 {
@@ -332,6 +340,7 @@ public class BetRecord
 ```
 
 #### Alert
+
 ```csharp
 public class Alert
 {
@@ -344,6 +353,7 @@ public class Alert
 ```
 
 #### ThresholdRule
+
 ```csharp
 public class ThresholdRule
 {
@@ -358,12 +368,14 @@ public class ThresholdRule
 ## Machine Learning Pipeline
 
 ### Model Architecture
+
 - **Base Model**: EfficientNet-B0 (pretrained on ImageNet)
 - **Custom Classifier**: Multi-layer perceptron with dropout and batch normalization
 - **Input Processing**: CLAHE enhancement, grayscale conversion, normalization
 - **Output**: Writer ID (1-based) and confidence score (0.0-1.0)
 
 ### Training Pipeline
+
 - **Data Preparation**: Stratified train/validation splits
 - **Augmentations**: Rotation, scaling, contrast adjustments
 - **Optimization**: AdamW optimizer with learning rate scheduling
@@ -371,6 +383,7 @@ public class ThresholdRule
 - **Checkpointing**: Automatic saving of best model weights
 
 ### Inference API
+
 - **Health Check**: `/health` - Service status and model information
 - **Classification**: `/classify-anonymous` - Upload image for writer identification
 - **Model Info**: `/model-info` - Model metadata and performance metrics
@@ -378,12 +391,14 @@ public class ThresholdRule
 ## Logging and Monitoring
 
 ### Application Logs
+
 - **Location**: `Logs/` directory with daily rotation
 - **Format**: Structured JSON logging with Serilog
 - **Levels**: Information, Warning, Error, Debug
 - **Retention**: Configurable log file retention policy
 
 ### Health Checks
+
 - **Database Connectivity**: Entity Framework health checks
 - **ML Service**: Classification service availability
 - **System Resources**: Memory and disk usage monitoring
@@ -391,17 +406,20 @@ public class ThresholdRule
 ## Development Guidelines
 
 ### Code Structure
+
 - **Controllers**: Handle HTTP requests and responses
 - **Services**: Implement business logic and external integrations
 - **Models**: Entity Framework entities for database mapping
 - **DTOs**: Data transfer objects for API contracts
 
 ### Testing Strategy
+
 - **Unit Tests**: Business logic and service layer testing
 - **Integration Tests**: API endpoint and database testing
 - **ML Model Tests**: Classification accuracy and performance testing
 
 ### Deployment Considerations
+
 - **Database Migrations**: Automatic application on startup
 - **Configuration Management**: Environment-specific settings
 - **Logging**: Centralized logging for production monitoring
@@ -410,6 +428,7 @@ public class ThresholdRule
 ## Contributing
 
 ### Development Setup
+
 1. **Fork the repository** and clone your fork
 2. **Create a feature branch** from `main`
 3. **Install dependencies** for all three services
